@@ -155,13 +155,10 @@ docker compose -f compose.yml -f compose.dev.yml down
 - Image должен содержать Node.js с поддержкой `fetch`, используемого healthcheck.
 - Приложение должно корректно работать за reverse proxy и использовать относительный `/api` либо публичный origin `https://dev.sova.1uup.ru`.
 - Контейнер следует запускать от непривилегированного пользователя, определённого в Dockerfile.
-- GitHub Actions frontend-репозитория должен собирать, проверять и публиковать образ в GHCR; сервер не должен собирать frontend.
-
-На момент создания инфраструктуры workflow frontend выполняет quality checks, но отдельную публикацию image в GHCR ещё необходимо добавить.
+- GitHub Actions frontend-репозитория должен собирать, проверять и публиковать образ в GHCR; сервер не должен собирать frontend. Workflow публикации создаёт теги `dev` и `sha-<commit>`.
 
 ### `sova-backend`
 
-- На момент создания инфраструктуры backend-репозиторий пуст; все перечисленные ниже требования ещё нужно реализовать.
 - Dockerfile должен собирать production image, опубликованный как `ghcr.io/abat-voix/sova-backend:<tag>`.
 - Контейнер должен слушать `0.0.0.0:8000` через production WSGI/ASGI server (например, Gunicorn/Uvicorn), а не `runserver`.
 - Настройки должны читать `DATABASE_URL`, `REDIS_URL`, `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DJANGO_DEBUG`, `STATIC_ROOT` и `MEDIA_ROOT`.
@@ -170,7 +167,7 @@ docker compose -f compose.yml -f compose.dev.yml down
 - При работе за proxy Django должен доверять `X-Forwarded-Proto` от Caddy (обычно `SECURE_PROXY_SSL_HEADER`) и корректно определять HTTPS.
 - Миграции должны поддерживать `python manage.py migrate --noinput` и быть обратно совместимыми при rolling-style обновлении.
 - Контейнер следует запускать от непривилегированного пользователя, определённого в Dockerfile, с правами записи в static/media volumes.
-- GitHub Actions backend-репозитория должен собирать, проверять и публиковать образ в GHCR; сервер не должен собирать backend.
+- GitHub Actions backend-репозитория должен собирать, проверять и публиковать образ в GHCR; сервер не должен собирать backend. Workflow публикации создаёт теги `dev` и `sha-<commit>`.
 
 ## Troubleshooting
 
