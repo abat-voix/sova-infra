@@ -1,0 +1,15 @@
+services:
+  frontend:
+    environment:
+      NODE_ENV: production
+
+  backend:
+    environment:
+      ENVIRONMENT: development
+      DJANGO_DEBUG: "false"
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-dev.sova.1uup.ru}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-https://dev.sova.1uup.ru}
+
+  caddy:
+    environment:
+      DOMAIN: ${DOMAIN:-dev.sova.1uup.ru}
