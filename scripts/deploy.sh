@@ -2,6 +2,13 @@
 
 set -Eeuo pipefail
 
+exec 9>/tmp/sova-deploy.lock
+
+if ! flock -n 9; then
+  echo "Another SOVA deployment is already running." >&2
+  exit 1
+fi
+
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 readonly ENV_FILE="${PROJECT_DIR}/.env"
