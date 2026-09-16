@@ -34,6 +34,13 @@ services:
       CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-https://dev.sova.1uup.ru}
       STATIC_ROOT: ${STATIC_ROOT:-/app/staticfiles}
       MEDIA_ROOT: ${MEDIA_ROOT:-/app/media}
+      EMAIL_HOST: ${EMAIL_HOST:?Set EMAIL_HOST in .env}
+      EMAIL_PORT: ${EMAIL_PORT:-465}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER:?Set EMAIL_HOST_USER in .env}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:?Set EMAIL_HOST_PASSWORD in .env}
+      EMAIL_USE_SSL: ${EMAIL_USE_SSL:-true}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-false}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-СОВА <noreply@1uup.ru>}
     expose:
       - "8000"
     volumes:
