@@ -57,7 +57,7 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Заполните `.env`. Как минимум задайте сильные уникальные значения для `POSTGRES_PASSWORD`, `DATABASE_URL`, `DJANGO_SECRET_KEY` и `EMAIL_HOST_PASSWORD`. Например, `DATABASE_URL` должен ссылаться на Docker-сервис PostgreSQL:
+Заполните `.env`. Как минимум задайте сильные уникальные значения для `POSTGRES_PASSWORD`, `DATABASE_URL` и `DJANGO_SECRET_KEY`. Например, `DATABASE_URL` должен ссылаться на Docker-сервис PostgreSQL:
 
 ```dotenv
 DATABASE_URL=postgresql://sova:URL_ENCODED_PASSWORD@postgres:5432/sova
@@ -65,9 +65,12 @@ DATABASE_URL=postgresql://sova:URL_ENCODED_PASSWORD@postgres:5432/sova
 
 Если пароль содержит специальные символы, URL-кодируйте их в `DATABASE_URL`. Не коммитьте `.env`: этот файл существует только на сервере.
 
-Для исходящей почты укажите полный адрес созданного ящика в
-`EMAIL_HOST_USER` и его отдельный пароль в `EMAIL_HOST_PASSWORD`. Конфигурация
-по умолчанию использует `mail.nic.ru:465` с SSL. Не включайте одновременно
+Для исходящей почты укажите `EMAIL_HOST`, полный адрес созданного ящика в
+`EMAIL_HOST_USER` и его отдельный пароль в `EMAIL_HOST_PASSWORD`. Без этих трёх
+переменных development-окружение продолжит работать, но письма будут выводиться
+в консоль контейнера. SMTP-поля нужно задавать либо все вместе, либо не задавать
+вовсе. В production все три переменные обязательны. Конфигурация по умолчанию
+использует порт `465` с SSL. Не включайте одновременно
 `EMAIL_USE_SSL` и `EMAIL_USE_TLS`.
 
 ### GHCR authorization
