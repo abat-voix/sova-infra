@@ -41,6 +41,13 @@ services:
       EMAIL_USE_SSL: ${EMAIL_USE_SSL:-true}
       EMAIL_USE_TLS: ${EMAIL_USE_TLS:-false}
       DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-СОВА <noreply@1uup.ru>}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-https://dev.sova.1uup.ru}
+      KEYCLOAK_PUBLIC_URL: ${KEYCLOAK_PUBLIC_URL:-https://auth.dev.sova.1uup.ru}
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-sova}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-sova-web}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
+      SESSION_COOKIE_AGE: ${SESSION_COOKIE_AGE:-28800}
     expose:
       - "8000"
     volumes:
@@ -50,6 +57,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
     networks:
       - sova
@@ -103,11 +112,86 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  keycloak-postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${KEYCLOAK_DB:-keycloak}
+      POSTGRES_USER: ${KEYCLOAK_DB_USER:-keycloak}
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD in .env}
+    volumes:
+      - keycloak_postgres_data:/var/lib/postgresql/data
+    networks:
+      - sova
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.4
+    restart: unless-stopped
+    command: ["start", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL_HOST: keycloak-postgres
+      KC_DB_URL_DATABASE: ${KEYCLOAK_DB:-keycloak}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER:-keycloak}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD in .env}
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-https://auth.dev.sova.1uup.ru}
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      SOVA_APP_URL: ${APP_PUBLIC_URL:-https://dev.sova.1uup.ru}
+      SOVA_OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-https://dev.sova.1uup.ru/api/auth/oidc/callback/}
+      SOVA_KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-sova-web}
+      SOVA_KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
+      SOVA_SMTP_HOST: ${EMAIL_HOST:-}
+      SOVA_SMTP_PORT: ${EMAIL_PORT:-465}
+      SOVA_SMTP_USER: ${EMAIL_HOST_USER:-}
+      SOVA_SMTP_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      SOVA_SMTP_FROM: ${KEYCLOAK_EMAIL_FROM:-noreply@1uup.ru}
+      SOVA_SMTP_SSL: ${EMAIL_USE_SSL:-true}
+      SOVA_SMTP_STARTTLS: ${EMAIL_USE_TLS:-false}
+    expose:
+      - "8080"
+      - "9000"
+    volumes:
+      - ./keycloak/sova-realm.json:/opt/keycloak/data/import/sova-realm.json:ro
+    depends_on:
+      keycloak-postgres:
+        condition: service_healthy
+    networks:
+      - sova
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'HEAD /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q 'HTTP/1.1 200' <&3
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:-dev.sova.1uup.ru}
+      AUTH_DOMAIN: ${AUTH_DOMAIN:-auth.dev.sova.1uup.ru}
     ports:
       - "80:80"
       - "443:443"
@@ -122,6 +206,8 @@ services:
       frontend:
         condition: service_healthy
       backend:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
     networks:
       - sova
@@ -142,6 +228,7 @@ networks:
 volumes:
   postgres_data:
   redis_data:
+  keycloak_postgres_data:
   caddy_data:
   caddy_config:
   django_static:

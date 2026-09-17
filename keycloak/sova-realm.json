@@ -1,0 +1,75 @@
+{
+  "realm": "sova",
+  "displayName": "СОВА",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": false,
+  "rememberMe": true,
+  "verifyEmail": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+  "passwordPolicy": "length(12) and digits(1) and upperCase(1) and lowerCase(1)",
+  "internationalizationEnabled": true,
+  "supportedLocales": ["ru", "en"],
+  "defaultLocale": "ru",
+  "smtpServer": {
+    "host": "${SOVA_SMTP_HOST}",
+    "port": "${SOVA_SMTP_PORT}",
+    "from": "${SOVA_SMTP_FROM}",
+    "fromDisplayName": "СОВА",
+    "auth": "true",
+    "user": "${SOVA_SMTP_USER}",
+    "password": "${SOVA_SMTP_PASSWORD}",
+    "ssl": "${SOVA_SMTP_SSL}",
+    "starttls": "${SOVA_SMTP_STARTTLS}"
+  },
+  "clients": [
+    {
+      "clientId": "${SOVA_KEYCLOAK_CLIENT_ID}",
+      "name": "СОВА Web",
+      "description": "Server-side OpenID Connect client for the SOVA application",
+      "rootUrl": "${SOVA_APP_URL}",
+      "baseUrl": "${SOVA_APP_URL}",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${SOVA_KEYCLOAK_CLIENT_SECRET}",
+      "redirectUris": ["${SOVA_OIDC_REDIRECT_URI}"],
+      "webOrigins": ["${SOVA_APP_URL}"],
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "frontchannelLogout": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "${SOVA_APP_URL}/*"
+      },
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "roles",
+        "profile",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ]
+    }
+  ]
+}
