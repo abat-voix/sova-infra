@@ -47,6 +47,9 @@ echo "Pulling application and infrastructure images..."
 echo "Starting PostgreSQL, Redis, Gotenberg, and Keycloak..."
 "${COMPOSE[@]}" up -d --wait postgres redis gotenberg keycloak-postgres keycloak
 
+echo "Reconciling optional Keycloak test accounts..."
+"${COMPOSE[@]}" --profile test-data run --rm keycloak-test-user-bootstrap
+
 echo "Applying Django migrations..."
 "${COMPOSE[@]}" run --rm backend python manage.py migrate --noinput
 

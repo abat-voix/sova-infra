@@ -206,6 +206,30 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  keycloak-test-user-bootstrap:
+    image: quay.io/keycloak/keycloak:26.7.4
+    profiles: ["test-data"]
+    entrypoint: ["/bin/bash", "/opt/keycloak/bootstrap-test-users.sh"]
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SEED_TEST_ACCOUNTS: ${SEED_TEST_ACCOUNTS:-false}
+      KEYCLOAK_SERVER_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-sova}
+      KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      TEST_KAM_PASSWORD: ${TEST_KAM_PASSWORD:-}
+      TEST_BOSS_PASSWORD: ${TEST_BOSS_PASSWORD:-}
+      TEST_ADMIN_PASSWORD: ${TEST_ADMIN_PASSWORD:-}
+    volumes:
+      - ./scripts/bootstrap-test-users.sh:/opt/keycloak/bootstrap-test-users.sh:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    networks:
+      - sova
+    security_opt:
+      - no-new-privileges:true
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped

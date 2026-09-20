@@ -106,6 +106,25 @@ Client secret должен совпадать в Django и импортируе�
 изменения нужно применить через Keycloak Admin Console либо контролируемый
 повторный import.
 
+### Test accounts
+
+Dev deployment может автоматически создать три тестовые учётные записи в
+Keycloak: `test-kam`, `test-boss` и `test-admin`. Для этого задайте в серверном
+`.env`:
+
+```dotenv
+SEED_TEST_ACCOUNTS=true
+TEST_KAM_PASSWORD=<UNIQUE_SECRET>
+TEST_BOSS_PASSWORD=<UNIQUE_SECRET>
+TEST_ADMIN_PASSWORD=<UNIQUE_SECRET>
+```
+
+`scripts/deploy.sh` запускает идемпотентный bootstrap после готовности Keycloak.
+Отсутствующие пользователи создаются, а существующие включаются и получают имя,
+подтверждённый тестовый email и пароль из `.env`. Поэтому ручная смена пароля
+тестового аккаунта будет отменена следующим deployment. Bootstrap работает
+только при `ENVIRONMENT=development` и не назначает прикладные роли СОВА.
+
 ### GHCR authorization
 
 Для публичных образов авторизация не нужна. Для приватных создайте GitHub personal access token с минимальным правом `read:packages` и передайте его только через окружение текущего shell:
