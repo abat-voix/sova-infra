@@ -2,7 +2,7 @@
 
 set -Eeuo pipefail
 
-exec 9>/tmp/sova-deploy.lock
+exec 9>/tmp/dev-sova-1uup-ru-deploy.lock
 
 if ! flock -n 9; then
   echo "Another SOVA deployment is already running." >&2
