@@ -266,7 +266,7 @@ services:
 
 networks:
   sova:
-    name: sova
+    name: dev-sova-1uup-ru
     driver: bridge
 
 volumes:

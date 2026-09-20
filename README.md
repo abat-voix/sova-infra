@@ -322,7 +322,7 @@ docker compose -f compose.yml -f compose.dev.yml config
 
 ```bash
 docker compose -f compose.yml -f compose.dev.yml ps
-docker inspect --format '{{json .State.Health}}' sova-backend-1
+docker inspect --format '{{json .State.Health}}' dev-sova-1uup-ru-backend-1
 docker compose -f compose.yml -f compose.dev.yml logs --tail=200 backend
 docker compose -f compose.yml -f compose.dev.yml logs --tail=200 keycloak
 ```
