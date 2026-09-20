@@ -18,10 +18,10 @@
           Next.js              Django
          frontend              backend
                                   |
-                         +--------+--------+
-                         |                 |
-                         v                 v
-                     PostgreSQL          Redis
+                    +-------------+--------+----------+
+                    |                      |          |
+                    v                      v          v
+                PostgreSQL               Redis   Gotenberg
 
         auth.dev.sova.1uup.ru
                   |
@@ -39,7 +39,11 @@ Caddy — единственная публичная точка входа. О�
 - `/media/*` → Django media volume;
 - все остальные пути → `frontend:3000`.
 
-PostgreSQL, Redis, Django и Next.js не публикуют порты на хосте. Данные PostgreSQL, Redis, Caddy, static и media хранятся в named volumes. WebSocket-соединения поддерживаются `reverse_proxy` Caddy автоматически.
+PostgreSQL, Redis, Gotenberg, Django и Next.js не публикуют порты на хосте.
+Gotenberg доступен только backend во внутренней Docker-сети и преобразует HTML
+отчётов в PDF через Chromium. Данные PostgreSQL, Redis, Caddy, static и media
+хранятся в named volumes. WebSocket-соединения поддерживаются `reverse_proxy`
+Caddy автоматически.
 
 Keycloak доступен только через `https://auth.dev.sova.1uup.ru`; его application
 и management-порты наружу не публикуются. Realm `sova` импортируется при первом
@@ -124,8 +128,8 @@ docker compose -f compose.yml -f compose.dev.yml config
 ./scripts/deploy.sh
 ```
 
-Deploy загружает готовые образы, запускает обе базы PostgreSQL, Redis и
-Keycloak, ожидает их готовности, выполняет Django migrations и `collectstatic`
+Deploy загружает готовые образы, запускает обе базы PostgreSQL, Redis, Gotenberg
+и Keycloak, ожидает их готовности, выполняет Django migrations и `collectstatic`
 в одноразовых контейнерах, а затем обновляет весь стек. Persistent volumes
 автоматически не удаляются.
 
@@ -147,8 +151,8 @@ admin относится к служебному realm `master` и не явля
 ## Local development
 
 Локально frontend и backend запускаются обычными командами из их репозиториев,
-а вся инфраструктура — PostgreSQL приложения, Redis, Keycloak и PostgreSQL
-Keycloak — поднимается из `compose.local.yml`. Этот файл использует собственный
+а вся инфраструктура — PostgreSQL приложения, Redis, Gotenberg, Keycloak и
+PostgreSQL Keycloak — поднимается из `compose.local.yml`. Этот файл использует собственный
 env-файл `.env.local`; не путайте его с `.env`, который описывает dev-стенд и
 существует только на сервере.
 
@@ -167,6 +171,7 @@ docker compose --env-file .env.local -f compose.local.yml ps
 | --- | --- | --- |
 | PostgreSQL приложения | `localhost:5432`, база `sova` | `POSTGRES_HOST_PORT` |
 | Redis | `localhost:6379` | `REDIS_HOST_PORT` |
+| Gotenberg | `http://localhost:3001` | `GOTENBERG_HOST_PORT` |
 | Keycloak | `http://localhost:8080` | `KEYCLOAK_HOST_PORT` |
 | PostgreSQL Keycloak | не публикуется | — |
 
@@ -181,6 +186,7 @@ docker compose --env-file .env.local -f compose.local.yml ps
 ```dotenv
 DATABASE_URL=postgresql://sova:<POSTGRES_PASSWORD>@localhost:5432/sova
 REDIS_URL=redis://localhost:6379/0
+GOTENBERG_URL=http://localhost:3001
 KEYCLOAK_CLIENT_SECRET=<то же значение, что в .env.local>
 ```
 
@@ -276,6 +282,7 @@ docker compose -f compose.yml -f compose.dev.yml down
 - Dockerfile должен собирать production image, опубликованный как `ghcr.io/abat-voix/sova-backend:<tag>`.
 - Контейнер должен слушать `0.0.0.0:8000` через production WSGI/ASGI server (например, Gunicorn/Uvicorn), а не `runserver`.
 - Настройки должны читать `DATABASE_URL`, `REDIS_URL`, `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DJANGO_DEBUG`, `STATIC_ROOT` и `MEDIA_ROOT`.
+- Для генерации PDF backend должен читать `GOTENBERG_URL` и обращаться к Gotenberg только через внутреннюю Docker-сеть.
 - OIDC-настройки должны читать `APP_PUBLIC_URL`, `KEYCLOAK_PUBLIC_URL`, `KEYCLOAK_INTERNAL_URL`, `KEYCLOAK_REALM`, `KEYCLOAK_CLIENT_ID` и `KEYCLOAK_CLIENT_SECRET`.
 - Должен существовать неаутентифицированный лёгкий endpoint `GET /api/health/`, возвращающий успешный HTTP-код после готовности процесса.
 - `collectstatic` должен складывать файлы в `/app/staticfiles`; загружаемые media — в `/app/media`. Оба пути являются persistent volumes и доступны Caddy только для чтения.
@@ -312,11 +319,11 @@ docker compose -f compose.yml -f compose.dev.yml run --rm backend python manage.
 ## Security notes
 
 - Секреты находятся только в серверном `.env`; сертификаты Caddy — в named volume.
-- PostgreSQL и Redis закреплены на major version, Caddy — на major, а Keycloak
-  — на точной security-patch версии. Перед обновлением Keycloak нужно проверить
-  его migration guide и сделать backup обеих баз.
+- PostgreSQL и Redis закреплены на major version, Caddy — на major, а Gotenberg
+  и Keycloak — на точных security-patch версиях. Перед обновлением Keycloak
+  нужно проверить его migration guide и сделать backup обеих баз.
 - `no-new-privileges` включён для всех сервисов; приложение должно задавать непривилегированного пользователя внутри собственных Dockerfile.
-- Не публикуйте PostgreSQL, Redis или application ports и не добавляйте секреты в Compose-файлы.
+- Не публикуйте PostgreSQL, Redis, Gotenberg или application ports и не добавляйте секреты в Compose-файлы.
 - Эта конфигурация сама по себе не обеспечивает соответствие 152-ФЗ, требованиям ФСТЭК или другим режимам регулирования. Такое соответствие требует отдельного комплекса организационных и технических мер.
 
 ## Production extension

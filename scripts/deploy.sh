@@ -44,8 +44,8 @@ fi
 echo "Pulling application and infrastructure images..."
 "${COMPOSE[@]}" pull
 
-echo "Starting PostgreSQL, Redis, and Keycloak..."
-"${COMPOSE[@]}" up -d --wait postgres redis keycloak-postgres keycloak
+echo "Starting PostgreSQL, Redis, Gotenberg, and Keycloak..."
+"${COMPOSE[@]}" up -d --wait postgres redis gotenberg keycloak-postgres keycloak
 
 echo "Applying Django migrations..."
 "${COMPOSE[@]}" run --rm backend python manage.py migrate --noinput

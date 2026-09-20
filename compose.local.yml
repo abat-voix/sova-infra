@@ -1,8 +1,8 @@
 name: sova-local
 
-# Локальная инфраструктура разработки: PostgreSQL приложения, Redis, Keycloak
-# и отдельный PostgreSQL для Keycloak. Frontend и backend запускаются нативно
-# из своих репозиториев и подключаются к этим сервисам через 127.0.0.1.
+# Локальная инфраструктура разработки: PostgreSQL приложения, Redis, Gotenberg,
+# Keycloak и отдельный PostgreSQL для Keycloak. Frontend и backend запускаются
+# нативно из своих репозиториев и подключаются к этим сервисам через 127.0.0.1.
 #
 # Порты публикуются только на loopback. Если порт занят другим проектом,
 # переопределите *_HOST_PORT в .env.local.
@@ -42,6 +42,20 @@ services:
       timeout: 5s
       retries: 10
       start_period: 5s
+    security_opt:
+      - no-new-privileges:true
+
+  gotenberg:
+    image: gotenberg/gotenberg:8.37.0-chromium
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${GOTENBERG_HOST_PORT:-3001}:3000"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     security_opt:
       - no-new-privileges:true
 

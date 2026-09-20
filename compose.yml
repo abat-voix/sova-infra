@@ -28,6 +28,8 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      GOTENBERG_URL: ${GOTENBERG_URL:-http://gotenberg:3000}
+      GOTENBERG_TIMEOUT: ${GOTENBERG_TIMEOUT:-30}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-false}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-dev.sova.1uup.ru}
@@ -60,6 +62,8 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+      gotenberg:
+        condition: service_healthy
     networks:
       - sova
     healthcheck:
@@ -72,6 +76,22 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+  gotenberg:
+    image: gotenberg/gotenberg:8.37.0-chromium
+    restart: unless-stopped
+    expose:
+      - "3000"
+    networks:
+      - sova
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     security_opt:
       - no-new-privileges:true
 
