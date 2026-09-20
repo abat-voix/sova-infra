@@ -1,7 +1,7 @@
 # СОВА — локальный запуск
 
-Схема локальной среды: инфраструктура (PostgreSQL, Redis, Keycloak + его
-PostgreSQL) работает в Docker из `sova-infra/compose.local.yml`, а backend
+Схема локальной среды: инфраструктура (PostgreSQL, Redis, Gotenberg, Keycloak +
+его PostgreSQL) работает в Docker из `sova-infra/compose.local.yml`, а backend
 (Django) и frontend (Next.js) запускаются нативно и ходят в контейнеры через
 `127.0.0.1`.
 
@@ -13,6 +13,7 @@ PostgreSQL) работает в Docker из `sova-infra/compose.local.yml`, а b
              │
              ├─→ localhost:5432  PostgreSQL     (docker)
              ├─→ localhost:6379  Redis          (docker)
+             ├─→ localhost:3001  Gotenberg      (docker)
              └─→ localhost:8080  Keycloak       (docker)
                                   └─ PostgreSQL Keycloak (docker, порт не публикуется)
 ```
@@ -83,6 +84,7 @@ docker compose --env-file .env.local -f compose.local.yml ps
 | --- | --- | --- |
 | PostgreSQL приложения | `localhost:5432`, база `sova`, пользователь `sova` | `POSTGRES_HOST_PORT` |
 | Redis | `localhost:6379` | `REDIS_HOST_PORT` |
+| Gotenberg | `http://localhost:3001` | `GOTENBERG_HOST_PORT` |
 | Keycloak | `http://localhost:8080` | `KEYCLOAK_HOST_PORT` |
 | PostgreSQL Keycloak | не публикуется наружу | — |
 
@@ -113,6 +115,7 @@ cp .env.example .env
 DJANGO_SECRET_KEY=<любая случайная строка, например openssl rand -hex 32>
 DATABASE_URL=postgresql://sova:<POSTGRES_PASSWORD>@localhost:5432/sova
 REDIS_URL=redis://localhost:6379/0
+GOTENBERG_URL=http://localhost:3001
 KEYCLOAK_CLIENT_SECRET=<то же значение, что в sova-infra/.env.local>
 ```
 
