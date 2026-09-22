@@ -24,10 +24,19 @@ services:
   backend:
     image: ghcr.io/abat-voix/sova-backend:${BACKEND_TAG:-dev}
     restart: unless-stopped
-    environment:
+    environment: &backend-environment
       ENVIRONMENT: ${ENVIRONMENT:-development}
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+      CELERY_TASK_ALWAYS_EAGER: "false"
+      REPORTS_STORAGE_ROOT: /app/private/reports
+      REPORTS_RETENTION_HOURS: ${REPORTS_RETENTION_HOURS:-72}
+      REPORTS_JOB_TIMEOUT_SECONDS: ${REPORTS_JOB_TIMEOUT_SECONDS:-1800}
+      REPORTS_MAX_ATTEMPTS: ${REPORTS_MAX_ATTEMPTS:-3}
+      REPORTS_PDF_MAX_ROWS: ${REPORTS_PDF_MAX_ROWS:-5000}
+      REPORTS_XLS_MAX_SHEETS: ${REPORTS_XLS_MAX_SHEETS:-4}
+      REPORTS_MAX_ACTIVE_JOBS_PER_USER: ${REPORTS_MAX_ACTIVE_JOBS_PER_USER:-5}
       GOTENBERG_URL: ${GOTENBERG_URL:-http://gotenberg:3000}
       GOTENBERG_TIMEOUT: ${GOTENBERG_TIMEOUT:-30}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env}
@@ -55,6 +64,7 @@ services:
     volumes:
       - django_static:/app/staticfiles
       - django_media:/app/media
+      - reports_data:/app/private/reports
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,6 +86,45 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+  reports-worker:
+    image: ghcr.io/abat-voix/sova-backend:${BACKEND_TAG:-dev}
+    command: ["celery", "-A", "sova", "worker", "--loglevel=INFO", "--concurrency=${REPORTS_WORKER_CONCURRENCY:-2}"]
+    restart: unless-stopped
+    environment: *backend-environment
+    volumes:
+      - reports_data:/app/private/reports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gotenberg:
+        condition: service_healthy
+    networks:
+      - sova
+    healthcheck:
+      disable: true
+    stop_grace_period: 32m
+    security_opt:
+      - no-new-privileges:true
+
+  reports-beat:
+    image: ghcr.io/abat-voix/sova-backend:${BACKEND_TAG:-dev}
+    command: ["celery", "-A", "sova", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat-schedule"]
+    restart: unless-stopped
+    environment: *backend-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sova
+    healthcheck:
+      disable: true
     security_opt:
       - no-new-privileges:true
 
@@ -277,3 +326,4 @@ volumes:
   caddy_config:
   django_static:
   django_media:
+  reports_data:

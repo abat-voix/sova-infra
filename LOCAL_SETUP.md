@@ -115,6 +115,7 @@ cp .env.example .env
 DJANGO_SECRET_KEY=<любая случайная строка, например openssl rand -hex 32>
 DATABASE_URL=postgresql://sova:<POSTGRES_PASSWORD>@localhost:5432/sova
 REDIS_URL=redis://localhost:6379/0
+CELERY_BROKER_URL=redis://localhost:6379/1
 GOTENBERG_URL=http://localhost:3001
 KEYCLOAK_CLIENT_SECRET=<то же значение, что в sova-infra/.env.local>
 ```
@@ -139,6 +140,21 @@ set +a
 poetry run python manage.py migrate
 poetry run python manage.py runserver
 ```
+
+Экспорт отчётов выполняется асинхронно. После запуска Django откройте два
+дополнительных терминала в `sova-backend`, загрузите в каждом переменные из
+`.env` теми же командами `set -a; source .env; set +a` и запустите:
+
+```bash
+poetry run celery -A sova worker --loglevel=INFO
+```
+
+```bash
+poetry run celery -A sova beat --loglevel=INFO
+```
+
+Worker и Django должны использовать один `REPORTS_STORAGE_ROOT` (по умолчанию
+`./private/reports`); готовые файлы выдаются только через API.
 
 Backend поднимется на `http://127.0.0.1:8000`. Проверка:
 

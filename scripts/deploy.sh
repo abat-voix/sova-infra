@@ -56,8 +56,8 @@ echo "Applying Django migrations..."
 echo "Collecting Django static files..."
 "${COMPOSE[@]}" run --rm backend python manage.py collectstatic --noinput
 
-echo "Starting or updating the application..."
-"${COMPOSE[@]}" up -d --remove-orphans
+echo "Starting or updating the application and report jobs..."
+"${COMPOSE[@]}" up -d --wait --remove-orphans
 
 echo "Current service state:"
 "${COMPOSE[@]}" ps

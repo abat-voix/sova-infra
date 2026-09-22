@@ -7,29 +7,11 @@
 ## Architecture
 
 ```text
-                    Internet
-                       |
-                       v
-                    Caddy
-                       |
-             +---------+---------+
-             |                   |
-             v                   v
-          Next.js              Django
-         frontend              backend
-                                  |
-                    +-------------+--------+----------+
-                    |                      |          |
-                    v                      v          v
-                PostgreSQL               Redis   Gotenberg
-
-        auth.dev.sova.1uup.ru
-                  |
-                  v
-                Caddy
-                  |
-                  v
-              Keycloak ----> Keycloak PostgreSQL
+Internet -> Caddy -> frontend / backend / Keycloak
+                       backend -> PostgreSQL, Redis, Gotenberg, reports_data
+                       reports-worker -> PostgreSQL, Redis, Gotenberg, reports_data
+                       reports-beat -> Redis -> reports-worker (cleanup task)
+                       Keycloak -> Keycloak PostgreSQL
 ```
 
 Caddy — единственная публичная точка входа. Он завершает TLS и направляет запросы к сервисам во внутренней Docker-сети:
@@ -40,10 +22,15 @@ Caddy — единственная публичная точка входа. О�
 - все остальные пути → `frontend:3000`.
 
 PostgreSQL, Redis, Gotenberg, Django и Next.js не публикуют порты на хосте.
-Gotenberg доступен только backend во внутренней Docker-сети и преобразует HTML
+Gotenberg доступен backend и worker во внутренней Docker-сети и преобразует HTML
 отчётов в PDF через Chromium. Данные PostgreSQL, Redis, Caddy, static и media
 хранятся в named volumes. WebSocket-соединения поддерживаются `reverse_proxy`
 Caddy автоматически.
+
+Экспорт отчётов выполняет отдельный Celery worker, а Celery beat ежечасно ставит
+задачу очистки просроченных файлов. API и worker используют приватный named volume
+`reports_data` (`/app/private/reports`); Caddy не монтирует и не публикует его.
+Скачивание отчёта проходит через авторизованный API.
 
 Keycloak доступен только через `https://auth.dev.sova.1uup.ru`; его application
 и management-порты наружу не публикуются. Realm `sova` импортируется при первом
@@ -149,7 +136,8 @@ docker compose -f compose.yml -f compose.dev.yml config
 
 Deploy загружает готовые образы, запускает обе базы PostgreSQL, Redis, Gotenberg
 и Keycloak, ожидает их готовности, выполняет Django migrations и `collectstatic`
-в одноразовых контейнерах, а затем обновляет весь стек. Persistent volumes
+в одноразовых контейнерах, а затем обновляет весь стек, включая Celery worker
+и beat. Persistent volumes
 автоматически не удаляются.
 
 Альтернативный ручной запуск без миграций:
@@ -205,12 +193,18 @@ docker compose --env-file .env.local -f compose.local.yml ps
 ```dotenv
 DATABASE_URL=postgresql://sova:<POSTGRES_PASSWORD>@localhost:5432/sova
 REDIS_URL=redis://localhost:6379/0
+CELERY_BROKER_URL=redis://localhost:6379/1
 GOTENBERG_URL=http://localhost:3001
 KEYCLOAK_CLIENT_SECRET=<то же значение, что в .env.local>
 ```
 
 Client secret должен совпадать в обоих файлах: realm импортирует именно то
 значение, которое Django затем предъявляет на token endpoint.
+
+Для асинхронного экспорта отчётов в двух дополнительных терминалах из каталога
+`sova-backend` запустите `poetry run celery -A sova worker --loglevel=INFO` и
+`poetry run celery -A sova beat --loglevel=INFO`. Оба процесса используют
+`sova-backend/.env` и тот же локальный `REPORTS_STORAGE_ROOT`, что и Django.
 
 Realm разрешает callback через локальный Next.js proxy:
 `http://localhost:3000/api/auth/oidc/callback/`.
@@ -243,6 +237,7 @@ docker compose --env-file .env.local -f compose.local.yml down --volumes
 docker compose -f compose.yml -f compose.dev.yml ps
 docker compose -f compose.yml -f compose.dev.yml logs -f
 docker compose -f compose.yml -f compose.dev.yml logs -f backend
+docker compose -f compose.yml -f compose.dev.yml logs -f reports-worker reports-beat
 ```
 
 Остановка контейнеров без удаления данных:
@@ -302,6 +297,7 @@ docker compose -f compose.yml -f compose.dev.yml down
 - Контейнер должен слушать `0.0.0.0:8000` через production WSGI/ASGI server (например, Gunicorn/Uvicorn), а не `runserver`.
 - Настройки должны читать `DATABASE_URL`, `REDIS_URL`, `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DJANGO_DEBUG`, `STATIC_ROOT` и `MEDIA_ROOT`.
 - Для генерации PDF backend должен читать `GOTENBERG_URL` и обращаться к Gotenberg только через внутреннюю Docker-сеть.
+- Celery worker и beat должны запускаться из того же backend-образа и использовать `CELERY_BROKER_URL` и `REPORTS_STORAGE_ROOT`.
 - OIDC-настройки должны читать `APP_PUBLIC_URL`, `KEYCLOAK_PUBLIC_URL`, `KEYCLOAK_INTERNAL_URL`, `KEYCLOAK_REALM`, `KEYCLOAK_CLIENT_ID` и `KEYCLOAK_CLIENT_SECRET`.
 - Должен существовать неаутентифицированный лёгкий endpoint `GET /api/health/`, возвращающий успешный HTTP-код после готовности процесса.
 - `collectstatic` должен складывать файлы в `/app/staticfiles`; загружаемые media — в `/app/media`. Оба пути являются persistent volumes и доступны Caddy только для чтения.
@@ -324,6 +320,7 @@ docker compose -f compose.yml -f compose.dev.yml config
 docker compose -f compose.yml -f compose.dev.yml ps
 docker inspect --format '{{json .State.Health}}' dev-sova-1uup-ru-backend-1
 docker compose -f compose.yml -f compose.dev.yml logs --tail=200 backend
+docker compose -f compose.yml -f compose.dev.yml logs --tail=200 reports-worker reports-beat
 docker compose -f compose.yml -f compose.dev.yml logs --tail=200 keycloak
 ```
 
