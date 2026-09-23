@@ -1,0 +1,25 @@
+# Конфигурация Garage — собственное S3-совместимое хранилище файлов проекта.
+# Секреты (rpc_secret, admin_token) сюда не идут — Garage читает их из переменных
+# окружения GARAGE_RPC_SECRET/GARAGE_ADMIN_TOKEN (см. compose.s3.yml и .env).
+#
+# Подробности и альтернатива — внешний S3-совместимый провайдер без Garage —
+# в sova-backend/docs/plans/2026-09-23-s3-storage.md.
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+
+# Один узел на один VPS — без репликации.
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+
+[s3_api]
+# S3_REGION в sova-backend/.env должен совпадать с этим значением — иначе SignatureDoesNotMatch.
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage.internal"
+
+[admin]
+api_bind_addr = "[::]:3903"
