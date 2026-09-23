@@ -18,8 +18,11 @@ Caddy — единственная публичная точка входа. О�
 
 - `/api/*` и `/admin/*` → `backend:8000`;
 - `/static/*` → Django static volume;
-- `/media/*` → Django media volume;
 - все остальные пути → `frontend:3000`.
+
+Вложения, файлы договоров и отчёты Caddy не отдаёт: они идут через авторизованные
+`.../download/` эндпоинты API (`visible_interactions`) — см. раздел «Хранилище файлов» ниже
+и `sova-backend/docs/plans/2026-09-23-s3-storage.md`.
 
 PostgreSQL, Redis, Gotenberg, Django и Next.js не публикуют порты на хосте.
 Gotenberg доступен backend и worker во внутренней Docker-сети и преобразует HTML
@@ -265,6 +268,11 @@ docker compose -f compose.yml -f compose.dev.yml down
 `backups/` исключён из Git. Храните обе базы согласованно: Keycloak содержит
 пользователей и credentials, а SOVA — ссылки на Keycloak `sub`.
 
+При `STORAGE_BACKEND=s3` тот же запуск зеркалирует бакет вложений и договоров в
+`backups/s3/current/`; всё, что с прошлого запуска было в бакете удалено или заменено,
+переезжает в `backups/s3/deleted/<TIMESTAMP>/` (см. «Хранилище файлов» выше) и хранится
+`S3_BACKUP_DELETED_RETENTION_DAYS` дней (по умолчанию 90).
+
 ## Restore
 
 Восстановление — явная ручная операция:
@@ -278,6 +286,39 @@ docker compose -f compose.yml -f compose.dev.yml down
 запускает `psql` с остановкой при первой SQL-ошибке. Перед восстановлением
 сделайте актуальный backup и остановите запись приложения в обе базы (включая
 `backend`, `frontend` и `keycloak`). Restore никогда не запускается из deploy.
+
+Бакет вложений и договоров — из последнего зеркала или из конкретного удалённого снимка:
+
+```bash
+./scripts/restore.sh s3
+./scripts/restore.sh s3 backups/s3/deleted/YYYY-MM-DD_HH-MM-SS
+```
+
+Копирует файлы в бакет, не удаляя из него ничего лишнего (`rclone copy`), также требует `RESTORE`.
+
+## Хранилище файлов
+
+Вложения действий, файлы договоров и готовые отчёты хранятся через
+`STORAGE_BACKEND` (`filesystem` по умолчанию или `s3`). Подробности, все переменные и порядок
+переноса — в `sova-backend/docs/plans/2026-09-23-s3-storage.md`.
+
+`S3_PROVIDER` в `.env` выбирает, кто выступает S3:
+
+- `garage` (по умолчанию) — собственный сервис `s3` (`compose.s3.yml`, образ
+  `dxflrs/garage:v2.3.0`), `deploy.sh` поднимает его и настраивает
+  (`scripts/s3-bootstrap.sh`: layout, бакеты `S3_MEDIA_BUCKET`/`S3_REPORTS_BUCKET`,
+  ключ приложения) при каждом деплое — идемпотентно;
+- `external` — уже существующий S3-совместимый провайдер (Yandex Object Storage, AWS и т. п.):
+  `compose.s3.yml` не подключается, `S3_*` в `.env` указывают на него напрямую.
+
+`deploy.sh` перед запуском приложения выполняет
+`python manage.py check_storage --apply-lifecycle` — деплой останавливается, если хранилище
+недоступно. `backup.sh` при `STORAGE_BACKEND=s3` зеркалирует бакет `S3_MEDIA_BUCKET` в
+`backups/s3/` (см. раздел «Backup» — там же про `deleted/`, заменяющий отсутствующее в Garage
+версионирование); бакет отчётов не бэкапится — это временные файлы с TTL.
+
+Локальная разработка (`compose.local.yml`) поднимает Garage на `127.0.0.1:${S3_HOST_PORT:-3900}`
+так же, как Postgres/Redis/Gotenberg — см. `LOCAL_SETUP.md`.
 
 ## Requirements for application repositories
 

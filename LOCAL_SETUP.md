@@ -87,6 +87,7 @@ docker compose --env-file .env.local -f compose.local.yml ps
 | Gotenberg | `http://localhost:3001` | `GOTENBERG_HOST_PORT` |
 | Keycloak | `http://localhost:8080` | `KEYCLOAK_HOST_PORT` |
 | PostgreSQL Keycloak | не публикуется наружу | — |
+| S3 (Garage), опционально | `http://localhost:3900` | `S3_HOST_PORT` |
 
 Realm `sova` импортируется автоматически из `keycloak/sova-realm.json` при
 первом старте: клиент `sova-web`, redirect URI
@@ -97,6 +98,32 @@ Realm `sova` импортируется автоматически из `keycloa
 `KEYCLOAK_PUBLIC_URL` в `sova-backend/.env`. Смена `KEYCLOAK_HOST_PORT`
 автоматически меняет `KC_HOSTNAME`, а `FRONTEND_HOST_PORT` — `rootUrl` и
 redirect URI клиента `sova-web` в импортируемом realm.
+
+### 1а. Своё хранилище файлов (Garage), опционально
+
+Нужно только если в `sova-backend/.env` включаете `STORAGE_BACKEND=s3` вместо
+файловой системы. Сервис не входит в обычный `up -d` (у него профиль `s3`):
+
+Сначала задайте в `sova-backend/.env`: `STORAGE_BACKEND=s3`,
+`S3_ENDPOINT_URL=http://localhost:3900`, `S3_REGION=garage`, `S3_ACCESS_KEY_ID`,
+`S3_SECRET_ACCESS_KEY` (любые значения — `s3-bootstrap.sh` заведёт под них ключ в Garage) и,
+если нужно, `S3_MEDIA_BUCKET`/`S3_REPORTS_BUCKET`. Затем в `sova-infra/.env.local` — свои
+`GARAGE_RPC_SECRET` и `GARAGE_ADMIN_TOKEN` (`openssl rand -hex 32` / `openssl rand -base64 32`).
+
+```bash
+docker compose --env-file .env.local -f compose.local.yml --profile s3 up -d --wait s3
+
+# s3-bootstrap.sh настраивает Garage под S3_* из sova-backend/.env — их нужно
+# экспортировать в текущий шелл перед вызовом (сам .env.local их не содержит).
+set -a
+source ../sova-backend/.env
+set +a
+./scripts/s3-bootstrap.sh docker compose --env-file .env.local -f compose.local.yml
+```
+
+`s3-bootstrap.sh` идемпотентен: создаёт layout, бакеты `S3_MEDIA_BUCKET`/`S3_REPORTS_BUCKET`
+и ключ приложения из `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` — повторный запуск ничего не
+дублирует.
 
 ---
 

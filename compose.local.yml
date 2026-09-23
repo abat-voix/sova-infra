@@ -125,7 +125,34 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  # Опционально: собственное S3-совместимое хранилище файлов (см. sova-backend/README.md,
+  # раздел «Хранилище файлов»). Не нужен, если STORAGE_BACKEND=filesystem (по умолчанию) — тогда
+  # можно не запускать этот сервис вовсе.
+  s3:
+    image: dxflrs/garage:v2.3.0
+    profiles: ["s3"]
+    restart: unless-stopped
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?Set GARAGE_RPC_SECRET in .env.local}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?Set GARAGE_ADMIN_TOKEN in .env.local}
+    ports:
+      - "127.0.0.1:${S3_HOST_PORT:-3900}:3900"
+    volumes:
+      - ./garage/garage.toml:/etc/garage.toml:ro
+      - garage_meta:/var/lib/garage/meta
+      - garage_data:/var/lib/garage/data
+    healthcheck:
+      test: ["CMD", "/garage", "status"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
 volumes:
   postgres_data:
   redis_data:
   keycloak_postgres_data:
+  garage_meta:
+  garage_data:
