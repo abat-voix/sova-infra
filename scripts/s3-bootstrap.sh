@@ -44,7 +44,7 @@ done
 garage status
 
 echo "Checking cluster layout..."
-readonly NODE_ID="$(garage node id -q | tr -d '[:space:]')"
+readonly NODE_ID="$(garage node id -q | cut -d'@' -f1 | tr -d '[:space:]')"
 if garage status | grep -q "NO ROLE ASSIGNED"; then
   echo "Assigning single-node layout (capacity ${GARAGE_CAPACITY})..."
   garage layout assign -z dc1 -c "${GARAGE_CAPACITY}" "${NODE_ID}"
