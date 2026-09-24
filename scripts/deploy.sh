@@ -91,10 +91,11 @@ if ! "${COMPOSE[@]}" up -d --wait --remove-orphans; then
   exit 1
 fi
 
-echo "Reloading Caddy with the mounted configuration..."
-"${COMPOSE[@]}" exec -T caddy caddy reload \
-  --config /etc/caddy/Caddyfile \
-  --adapter caddyfile
+# Git updates tracked files by replacing their inode. A running container can
+# therefore keep the previous bind-mounted Caddyfile even after `git pull`.
+# Recreate Caddy so the mount always points at the current file before serving.
+echo "Recreating Caddy with the current mounted configuration..."
+"${COMPOSE[@]}" up -d --force-recreate --wait caddy
 
 if [[ -n "${REALTIME_SMOKE_URL:-}" || -n "${REALTIME_SMOKE_SESSION_COOKIE:-}" ]]; then
   if [[ -z "${REALTIME_SMOKE_URL:-}" || -z "${REALTIME_SMOKE_SESSION_COOKIE:-}" ]]; then
