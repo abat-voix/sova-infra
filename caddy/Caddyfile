@@ -27,6 +27,15 @@
 		}
 	}
 
+	@websocket_routes path /ws /ws/*
+	handle @websocket_routes {
+		reverse_proxy realtime:8000 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
 	handle {
 		reverse_proxy frontend:3000 {
 			header_up X-Real-IP {remote_host}

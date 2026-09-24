@@ -7,8 +7,9 @@
 ## Architecture
 
 ```text
-Internet -> Caddy -> frontend / backend / Keycloak
+Internet -> Caddy -> frontend / backend / realtime / Keycloak
                        backend -> PostgreSQL, Redis, Gotenberg, reports_data
+                       realtime (Daphne) -> PostgreSQL, Redis Channels DB 2
                        reports-worker -> PostgreSQL, Redis, Gotenberg, reports_data
                        reports-beat -> Redis -> reports-worker (cleanup task)
                        Keycloak -> Keycloak PostgreSQL
@@ -17,6 +18,7 @@ Internet -> Caddy -> frontend / backend / Keycloak
 Caddy — единственная публичная точка входа. Он завершает TLS и направляет запросы к сервисам во внутренней Docker-сети:
 
 - `/api/*` и `/admin/*` → `backend:8000`;
+- `/ws/*` → `realtime:8000` (Daphne/ASGI);
 - `/static/*` → Django static volume;
 - все остальные пути → `frontend:3000`.
 
@@ -139,9 +141,24 @@ docker compose -f compose.yml -f compose.dev.yml config
 
 Deploy загружает готовые образы, запускает обе базы PostgreSQL, Redis, Gotenberg
 и Keycloak, ожидает их готовности, выполняет Django migrations и `collectstatic`
-в одноразовых контейнерах, а затем обновляет весь стек, включая Celery worker
-и beat. Persistent volumes
-автоматически не удаляются.
+в одноразовых контейнерах, проверяет Caddyfile, а затем обновляет весь стек,
+включая Daphne, Celery worker и beat. После обновления Caddy явно перечитывает
+bind-mounted конфигурацию. Persistent volumes автоматически не удаляются.
+
+Проверить WebSocket handshake и heartbeat на dev-стенде можно через
+`scripts/websocket-smoke.py`. Передайте ему `REALTIME_SMOKE_URL` и
+`REALTIME_SMOKE_SESSION_COOKIE` для действующей тестовой Django-сессии; cookie
+используется только в памяти процесса и не выводится. Переменная
+`REALTIME_SMOKE_ORIGIN` задаёт Origin, если он отличается от origin URL.
+Перед deploy экспортируйте оба обязательных значения в shell; не добавляйте
+session cookie в `.env`, командную строку или историю shell.
+
+Если healthcheck `realtime` не проходит, Compose показывает failed service, а
+`docker compose ps` и логи позволяют определить, сломан Daphne HTTP listener
+или round-trip к Redis DB 2. HTTP backend не зависит от `realtime` и остаётся
+доступен. Для отката верните предыдущий `BACKEND_TAG` и предыдущий Caddyfile,
+затем запустите deploy снова. Redis volume сохраняйте: отдельная миграция данных
+для Channels не требуется.
 
 Альтернативный ручной запуск без миграций:
 
@@ -197,6 +214,8 @@ docker compose --env-file .env.local -f compose.local.yml ps
 DATABASE_URL=postgresql://sova:<POSTGRES_PASSWORD>@localhost:5432/sova
 REDIS_URL=redis://localhost:6379/0
 CELERY_BROKER_URL=redis://localhost:6379/1
+CHANNEL_REDIS_URL=redis://localhost:6379/2
+REALTIME_MAX_CONNECTION_AGE_SECONDS=1800
 GOTENBERG_URL=http://localhost:3001
 KEYCLOAK_CLIENT_SECRET=<то же значение, что в .env.local>
 ```
@@ -208,6 +227,17 @@ Client secret должен совпадать в обоих файлах: realm 
 `sova-backend` запустите `poetry run celery -A sova worker --loglevel=INFO` и
 `poetry run celery -A sova beat --loglevel=INFO`. Оба процесса используют
 `sova-backend/.env` и тот же локальный `REPORTS_STORAGE_ROOT`, что и Django.
+
+Для WebSocket запустите отдельный ASGI-процесс из каталога `sova-backend`:
+
+```bash
+poetry run daphne -b 0.0.0.0 -p 8001 sova.asgi:application
+```
+
+В `sova-frontend/.env.local` задайте
+`NEXT_PUBLIC_WS_URL=ws://localhost:8001/ws/events/`. Channels использует Redis DB
+2; DB 0 остаётся cache, DB 1 — Celery broker. На dev-стенде тот же процесс
+работает отдельным Compose-сервисом `realtime`.
 
 Realm разрешает callback через локальный Next.js proxy:
 `http://localhost:3000/api/auth/oidc/callback/`.
@@ -361,11 +391,12 @@ docker compose -f compose.yml -f compose.dev.yml config
 docker compose -f compose.yml -f compose.dev.yml ps
 docker inspect --format '{{json .State.Health}}' dev-sova-1uup-ru-backend-1
 docker compose -f compose.yml -f compose.dev.yml logs --tail=200 backend
+docker compose -f compose.yml -f compose.dev.yml logs --tail=200 realtime
 docker compose -f compose.yml -f compose.dev.yml logs --tail=200 reports-worker reports-beat
 docker compose -f compose.yml -f compose.dev.yml logs --tail=200 keycloak
 ```
 
-Если Caddy не получает сертификат, проверьте DNS, доступность портов 80/443, firewall и логи `caddy`. Если образы не загружаются, проверьте точность тегов и `docker login ghcr.io`. Если миграции падают, контейнеры приложения не обновляются, а ошибка возвращается вызывающему shell.
+Если Caddy не получает сертификат, проверьте DNS, доступность портов 80/443, firewall и логи `caddy`. Если WebSocket отвечает 502, проверьте состояние `realtime`, `CHANNEL_REDIS_URL` (Redis DB 2) и загрузите конфигурацию командой `docker compose ... exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`. Если образы не загружаются, проверьте точность тегов и `docker login ghcr.io`. Если миграции падают, контейнеры приложения не обновляются, а ошибка возвращается вызывающему shell.
 
 Для повторного сбора static после обновления backend (если image не выполняет это на старте):
 

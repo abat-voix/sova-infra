@@ -79,8 +79,33 @@ echo "Checking file storage..."
 echo "Collecting Django static files..."
 "${COMPOSE[@]}" run --rm backend python manage.py collectstatic --noinput
 
+echo "Validating Caddy configuration before applying the new routing..."
+"${COMPOSE[@]}" run --rm --no-deps caddy caddy validate \
+  --config /etc/caddy/Caddyfile \
+  --adapter caddyfile
+
 echo "Starting or updating the application and report jobs..."
-"${COMPOSE[@]}" up -d --wait --remove-orphans
+if ! "${COMPOSE[@]}" up -d --wait --remove-orphans; then
+  echo "Compose failed while waiting for services. Current service state:" >&2
+  "${COMPOSE[@]}" ps >&2 || true
+  exit 1
+fi
+
+echo "Reloading Caddy with the mounted configuration..."
+"${COMPOSE[@]}" exec -T caddy caddy reload \
+  --config /etc/caddy/Caddyfile \
+  --adapter caddyfile
+
+if [[ -n "${REALTIME_SMOKE_URL:-}" || -n "${REALTIME_SMOKE_SESSION_COOKIE:-}" ]]; then
+  if [[ -z "${REALTIME_SMOKE_URL:-}" || -z "${REALTIME_SMOKE_SESSION_COOKIE:-}" ]]; then
+    echo "Set both REALTIME_SMOKE_URL and REALTIME_SMOKE_SESSION_COOKIE to run the WebSocket smoke check." >&2
+    exit 1
+  fi
+  echo "Checking WebSocket handshake and heartbeat with the supplied session..."
+  python3 "${PROJECT_DIR}/scripts/websocket-smoke.py"
+else
+  echo "WebSocket smoke check skipped; supply a dev test session via REALTIME_SMOKE_URL and REALTIME_SMOKE_SESSION_COOKIE."
+fi
 
 echo "Current service state:"
 "${COMPOSE[@]}" ps

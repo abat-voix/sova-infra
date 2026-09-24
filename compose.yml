@@ -29,6 +29,9 @@ services:
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+      CHANNEL_REDIS_URL: ${CHANNEL_REDIS_URL:-redis://redis:6379/2}
+      REALTIME_MAX_CONNECTION_AGE_SECONDS: ${REALTIME_MAX_CONNECTION_AGE_SECONDS:-1800}
+      REALTIME_CHANNEL_CAPACITY: ${REALTIME_CHANNEL_CAPACITY:-100}
       CELERY_TASK_ALWAYS_EAGER: "false"
       REPORTS_STORAGE_ROOT: /app/private/reports
       REPORTS_RETENTION_HOURS: ${REPORTS_RETENTION_HOURS:-72}
@@ -118,6 +121,29 @@ services:
     healthcheck:
       disable: true
     stop_grace_period: 32m
+    security_opt:
+      - no-new-privileges:true
+
+  realtime:
+    image: ghcr.io/abat-voix/sova-backend:${BACKEND_TAG:-dev}
+    command: ["daphne", "-b", "0.0.0.0", "-p", "8000", "sova.asgi:application"]
+    restart: unless-stopped
+    environment: *backend-environment
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sova
+    healthcheck:
+      test: ["CMD", "python", "-m", "sova.realtime.healthcheck"]
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 20s
     security_opt:
       - no-new-privileges:true
 
