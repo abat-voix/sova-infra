@@ -1,6 +1,7 @@
 {
   "realm": "sova",
   "displayName": "СОВА",
+  "loginTheme": "sova",
   "enabled": true,
   "sslRequired": "external",
   "registrationAllowed": false,

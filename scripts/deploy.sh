@@ -59,6 +59,9 @@ echo "Pulling application and infrastructure images..."
 echo "Starting PostgreSQL, Redis, Gotenberg, and Keycloak..."
 "${COMPOSE[@]}" up -d --wait postgres redis gotenberg keycloak-postgres keycloak
 
+echo "Applying the SOVA Keycloak login theme..."
+"${COMPOSE[@]}" exec -T keycloak /opt/keycloak/configure-keycloak-theme.sh
+
 if [[ "${S3_PROVIDER:-garage}" == "garage" ]]; then
   echo "Starting Garage..."
   "${COMPOSE[@]}" up -d --wait s3

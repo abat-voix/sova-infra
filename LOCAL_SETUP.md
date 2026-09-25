@@ -75,6 +75,13 @@ docker compose --env-file .env.local -f compose.local.yml up -d
 docker compose --env-file .env.local -f compose.local.yml ps
 ```
 
+Если realm уже был создан до добавления темы входа, примените её один раз:
+
+```bash
+docker compose --env-file .env.local -f compose.local.yml exec keycloak \
+  /opt/keycloak/configure-keycloak-theme.sh
+```
+
 Дождитесь статуса `healthy` у всех сервисов (Keycloak стартует дольше всех,
 `start_period` 45 секунд).
 

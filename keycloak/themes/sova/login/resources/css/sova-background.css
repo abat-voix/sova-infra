@@ -1,0 +1,75 @@
+/* Keep the standard Keycloak v2 login UI and only replace its page background. */
+.login-pf body {
+  background-color: #f4f4f5;
+  background-image:
+    linear-gradient(to right, rgb(15 23 42 / 2.5%) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(15 23 42 / 2.5%) 1px, transparent 1px),
+    radial-gradient(
+      circle at 24% 14%,
+      rgb(119 0 255 / 22%),
+      transparent 34rem
+    ),
+    radial-gradient(
+      circle at 82% 86%,
+      rgb(255 79 18 / 18%),
+      transparent 30rem
+    );
+  background-attachment: fixed;
+  background-position: center;
+  background-repeat: repeat, repeat, no-repeat, no-repeat;
+  background-size: 40px 40px, 40px 40px, auto, auto;
+}
+
+/* Match the CRM welcome card without replacing Keycloak's form templates. */
+.pf-v5-c-login__main {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid #e7e8ea;
+  border-radius: 0.75rem;
+  background: #fff;
+  box-shadow: 0 20px 52px rgb(15 23 42 / 12%);
+}
+
+.pf-v5-c-login__main::before {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #7700ff, #ff4f12);
+  content: "";
+}
+
+.pf-v5-c-login__main-header {
+  border-top-color: transparent;
+}
+
+@media (prefers-color-scheme: dark) {
+  .login-pf body {
+    background-color: #0f172a;
+    background-image:
+      linear-gradient(to right, rgb(255 255 255 / 4%) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(255 255 255 / 4%) 1px, transparent 1px),
+      radial-gradient(
+        circle at 24% 14%,
+        rgb(168 102 255 / 26%),
+        transparent 34rem
+      ),
+      radial-gradient(
+        circle at 82% 86%,
+        rgb(255 107 53 / 20%),
+        transparent 30rem
+      );
+  }
+
+  .pf-v5-c-login__main {
+    border-color: #303b53;
+    background: #202b43;
+    box-shadow: 0 24px 64px rgb(0 0 0 / 36%);
+  }
+
+  .pf-v5-c-login__main::before {
+    background: linear-gradient(90deg, #a866ff, #ff6b35);
+  }
+}
