@@ -152,6 +152,11 @@ REDIS_URL=redis://localhost:6379/0
 CELERY_BROKER_URL=redis://localhost:6379/1
 GOTENBERG_URL=http://localhost:3001
 KEYCLOAK_CLIENT_SECRET=<то же значение, что в sova-infra/.env.local>
+# Токен от @BotFather; оставьте пустым, если Telegram не нужен.
+TELEGRAM_BOT_TOKEN=
+# Необязательный отдельный HTTP(S) или SOCKS proxy URL для Telegram.
+TELEGRAM_PROXY=
+NOTIFICATION_HTTP_TIMEOUT=10
 ```
 
 Остальное в `.env.example` уже настроено на локальную среду:
@@ -201,6 +206,74 @@ Backend поднимется на `http://127.0.0.1:8000`. Проверка:
 ```bash
 poetry run python manage.py createsuperuser
 ```
+
+### 2а. Telegram-уведомления локально, опционально
+
+В локальной схеме Django и Celery запускаются нативно, поэтому Telegram
+настраивается в `sova-backend/.env`, а не в `sova-infra/.env.local`.
+
+1. Создайте бота через `@BotFather` командой `/newbot` и запишите выданный
+   токен в `TELEGRAM_BOT_TOKEN` в `sova-backend/.env`. Токен — секрет: не
+   добавляйте рабочий `.env` в Git и не указывайте токен в профиле пользователя.
+2. Если Telegram доступен только через прокси, задайте в том же файле
+   `TELEGRAM_PROXY`. Поддерживаются URL HTTP(S) и SOCKS-прокси, в том числе с
+   авторизацией:
+
+   ```dotenv
+   TELEGRAM_PROXY=http://user:password@proxy.example:3128
+   # либо с разрешением DNS-имени Telegram через SOCKS-прокси:
+   TELEGRAM_PROXY=socks5h://127.0.0.1:1080
+   ```
+
+   Логин и пароль с символами `@`, `:`, `/`, `#` или `$` нужно URL-кодировать.
+   Рабочий proxy URL — такой же секрет, как токен бота.
+3. Перезапустите Django и Celery worker после изменения `.env`, предварительно
+   снова загрузив переменные командами `set -a; source .env; set +a` в каждом
+   терминале. Beat можно не перезапускать: Telegram-запросы выполняет worker или
+   Django-процесс.
+4. Пользователь должен открыть бота в Telegram и отправить ему `/start`: бот не
+   может первым начать личный диалог.
+5. Получите `chat_id` из обновлений бота. Следующий фрагмент передаёт тот же
+   прокси в `curl`, если `TELEGRAM_PROXY` заполнен:
+
+   ```bash
+   cd sova-backend
+   set -a
+   source .env
+   set +a
+   CURL_PROXY_ARGS=()
+   if [[ -n "${TELEGRAM_PROXY}" ]]; then
+     CURL_PROXY_ARGS=(--proxy "${TELEGRAM_PROXY}")
+   fi
+   curl "${CURL_PROXY_ARGS[@]}" --fail --silent --show-error \
+     "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getUpdates"
+   ```
+
+   В ответе найдите `result[].message.chat.id`. Для личного диалога это обычно
+   положительное число; у группы ID обычно отрицательный. Если `result` пуст,
+   отправьте боту ещё одно сообщение и повторите запрос.
+6. Откройте `http://127.0.0.1:8000/admin/` → **Профили уведомлений**, создайте
+   или откройте профиль нужного пользователя и внесите число в поле
+   **Telegram chat ID**. Токен в это поле вводить не нужно.
+7. В разделе **Настройки уведомлений** откройте нужный тип уведомления и
+   проверьте флаги **Включено**, нужного получателя и канала **Telegram**.
+
+Проверить токен и `chat_id` напрямую через Telegram Bot API можно так:
+
+```bash
+TELEGRAM_CHAT_ID=123456789
+CURL_PROXY_ARGS=()
+if [[ -n "${TELEGRAM_PROXY}" ]]; then
+  CURL_PROXY_ARGS=(--proxy "${TELEGRAM_PROXY}")
+fi
+curl "${CURL_PROXY_ARGS[@]}" --fail --silent --show-error \
+  --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+  --data-urlencode "text=Тестовое уведомление СОВА" \
+  "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage"
+```
+
+Успешный ответ содержит `"ok":true`. После этой проверки уведомления СОВА
+будут отправляться этому пользователю при наступлении включённых событий.
 
 > Быстрый запуск без Docker вообще: удалите/закомментируйте `DATABASE_URL` и
 > `REDIS_URL` — development-конфигурация тогда использует SQLite и in-memory
@@ -314,4 +387,5 @@ unit-тесты.
 | Redirect URI mismatch при входе | Frontend запущен не на 3000. Либо верните порт 3000, либо выставьте `FRONTEND_HOST_PORT` в `.env.local` и пересоздайте Keycloak с `--volumes`. |
 | `/api/...` из браузера возвращает 404 | Не запущен Django или `API_PROXY_TARGET` в `sova-frontend/.env.local` указывает не туда. |
 | Зацикленные редиректы на `/api/...` | Проверьте, что в `next.config.ts` сохранён `skipTrailingSlashRedirect: true` — Django работает с `APPEND_SLASH`. |
+| Telegram-уведомление не приходит | Проверьте, что пользователь отправил боту `/start`, в его профиле указан правильный `Telegram chat ID`, канал Telegram включён, а Django/worker перезапущены после изменения `TELEGRAM_BOT_TOKEN` или `TELEGRAM_PROXY`. Проверьте proxy URL отдельным запросом `curl --proxy "$TELEGRAM_PROXY"`; ошибка Telegram Bot API записывается в лог процесса-отправителя. |
 | Порт 5432/6379/8080 занят | Переопределите `*_HOST_PORT` в `.env.local` и синхронно поправьте `sova-backend/.env`. |
