@@ -107,21 +107,21 @@ upsert_user \
   "test-kam" \
   "Тестовый" \
   "КАМ" \
-  "test-kam@example.invalid" \
+  "kam@1uup.ru" \
   "${TEST_KAM_PASSWORD}"
 
 upsert_user \
   "test-boss" \
   "Тестовый" \
   "Руководитель" \
-  "test-boss@example.invalid" \
+  "boss@1uup.ru" \
   "${TEST_BOSS_PASSWORD}"
 
 upsert_user \
   "test-admin" \
   "Тестовый" \
   "Администратор" \
-  "test-admin@example.invalid" \
+  "admin_platform@1uup.ru" \
   "${TEST_ADMIN_PASSWORD}"
 
 echo "Keycloak test accounts are ready."
