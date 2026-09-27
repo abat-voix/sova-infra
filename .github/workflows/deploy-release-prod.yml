@@ -34,7 +34,7 @@ jobs:
       - name: Require a commit from develop
         run: |
           git fetch --quiet origin develop
-          git merge-base --is-ancestor HEAD origin/develop || {
+          git merge-base --is-ancestor HEAD FETCH_HEAD || {
             echo "The infra release tag must point to a commit already on develop." >&2
             exit 1
           }
