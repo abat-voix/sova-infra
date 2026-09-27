@@ -20,6 +20,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Validate release tag and image versions
         run: |
@@ -28,6 +30,14 @@ jobs:
             exit 1
           }
           bash scripts/validate-release-prod.sh
+
+      - name: Require a commit from develop
+        run: |
+          git fetch --quiet origin develop
+          git merge-base --is-ancestor HEAD origin/develop || {
+            echo "The infra release tag must point to a commit already on develop." >&2
+            exit 1
+          }
 
       - name: Configure production SSH key
         env:

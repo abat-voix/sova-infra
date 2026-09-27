@@ -43,8 +43,17 @@ The server-only `.env.prod` stays outside release directories.
 2. Set `BACKEND_TAG` and `FRONTEND_TAG` in `release.prod.env` in `sova-infra`.
    They may be different versions. Commit the file; keep secrets in the
    server-only `.env.prod`.
-3. Tag that infra commit with its own `vMAJOR.MINOR.PATCH` release tag and push
-   the tag. `deploy-release-prod.yml` uploads the infra snapshot and deploys it.
+3. Merge the version change into `sova-infra/develop`, update your local
+   `develop`, then publish its own `vMAJOR.MINOR.PATCH` release tag with one
+   command:
+
+   ```bash
+   ./scripts/tag-prod-release.sh v1.2.3
+   ```
+
+   `deploy-release-prod.yml` uploads that infra snapshot and deploys it. The
+   command refuses uncommitted changes or a branch that differs from remote
+   `develop`.
 
 The deployment validates configuration and image tags, backs up existing
 PostgreSQL databases, pulls images, starts dependencies, applies Django
@@ -56,9 +65,9 @@ database dumps do not contain uploaded files. If S3 is used, back up that
 bucket through the storage provider's backup mechanism.
 
 Tags are immutable release identifiers. To roll back application images,
-commit previous image tags to `release.prod.env` and create a **new** infra
-release tag. Database changes may need a restore from backup if migrations are
-not backward compatible.
+commit previous image tags to `release.prod.env`, merge them into `develop`,
+and create a **new** infra release tag. Database changes may need a restore
+from backup if migrations are not backward compatible.
 
 For a manual retry of an existing release on the server:
 
