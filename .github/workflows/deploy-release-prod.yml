@@ -1,0 +1,60 @@
+name: Deploy production release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sova-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate release tag and image versions
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Infra release tag must have the form v1.2.3" >&2
+            exit 1
+          }
+          bash scripts/validate-release-prod.sh
+
+      - name: Configure production SSH key
+        env:
+          PROD_SSH_KEY: ${{ secrets.PROD_SSH_KEY }}
+        run: |
+          [[ -n "$PROD_SSH_KEY" ]] || { echo "Set the PROD_SSH_KEY secret." >&2; exit 1; }
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$PROD_SSH_KEY" > "$HOME/.ssh/sova_prod_release"
+          chmod 600 "$HOME/.ssh/sova_prod_release"
+          cp .github/known_hosts.prod "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+
+      - name: Transfer this infra tag and deploy
+        run: |
+          set -Eeuo pipefail
+          readonly ROOT=/srv/docker/sova.1uup.ru
+          readonly TAG="$GITHUB_REF_NAME"
+          readonly RELEASE_DIR="$ROOT/releases/$TAG"
+          readonly STAGING_DIR="$ROOT/releases/.staging-$TAG-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          readonly TARGET=deploy@77.91.114.59
+          SSH=(ssh -i "$HOME/.ssh/sova_prod_release" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes)
+
+          if ! "${SSH[@]}" "$TARGET" "test -d '$RELEASE_DIR'"; then
+            "${SSH[@]}" "$TARGET" "mkdir -p '$STAGING_DIR'"
+            git archive --format=tar HEAD | "${SSH[@]}" "$TARGET" "tar -xf - -C '$STAGING_DIR'"
+            "${SSH[@]}" "$TARGET" "mv '$STAGING_DIR' '$RELEASE_DIR'"
+          fi
+
+          "${SSH[@]}" "$TARGET" \
+            "SOVA_PROD_ENV_FILE='$ROOT/.env.prod' bash '$RELEASE_DIR/scripts/deploy-prod.sh'"
