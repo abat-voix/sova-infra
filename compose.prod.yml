@@ -19,6 +19,10 @@ services:
         - -c
         - "import urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/api/health/', headers={'Host':'${DOMAIN:?Set DOMAIN in .env.prod}'}); urllib.request.urlopen(r, timeout=3)"
 
+  realtime:
+    healthcheck:
+      timeout: 20s
+
   keycloak:
     environment:
       KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:?Set KEYCLOAK_PUBLIC_URL in .env.prod}
