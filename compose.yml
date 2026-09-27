@@ -128,6 +128,21 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  telegram-bot:
+    image: ghcr.io/abat-voix/sova-backend:${BACKEND_TAG:-dev}
+    command: ["python", "manage.py", "telegram_poll_updates"]
+    restart: unless-stopped
+    environment: *backend-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sova
+    healthcheck:
+      disable: true
+    security_opt:
+      - no-new-privileges:true
+
   realtime:
     image: ghcr.io/abat-voix/sova-backend:${BACKEND_TAG:-dev}
     command: ["daphne", "-b", "0.0.0.0", "-p", "8000", "sova.asgi:application"]

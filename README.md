@@ -9,6 +9,7 @@
 ```text
 Internet -> Caddy -> frontend / backend / realtime / Keycloak
                        backend -> PostgreSQL, Redis, Gotenberg, reports_data
+                       telegram-bot -> Telegram Bot API, PostgreSQL
                        realtime (Daphne) -> PostgreSQL, Redis Channels DB 2
                        reports-worker -> PostgreSQL, Redis, Gotenberg, reports_data
                        reports-beat -> Redis -> reports-worker (cleanup task)
