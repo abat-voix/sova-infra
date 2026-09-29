@@ -1,20 +1,28 @@
-# Production releases
+Конечно. Сохранил технические названия, пути, переменные и команды без перевода.
 
-Production runs on `deploy@77.91.114.59` in `/srv/docker/sova.1uup.ru`.
-The application domain is `sova.1uup.ru`; Keycloak uses `auth.sova.1uup.ru`.
-The production Compose project, network and volumes are separate from dev.
-No production secrets or GitHub credentials are committed to Git.
+# Релизы в production
 
-## One-time setup
+Production работает на `deploy@77.91.114.59` в `/srv/docker/sova.1uup.ru`.
 
-1. Point both DNS A records to `77.91.114.59` and open TCP 80/443 and UDP 443.
-2. On the server, fill `/srv/docker/sova.1uup.ru/.env.prod` from
-   [`.env.prod.example`](.env.prod.example) and keep it mode `600`. Set all
-   passwords, SMTP credentials and a URL-encoded `DATABASE_URL` password.
-   The file is shell-compatible `KEY=VALUE` syntax; quote special characters.
-   Set `TELEGRAM_BOT_TOKEN` only if the Telegram polling service should run.
-3. If GHCR packages are private, log in once as `deploy` with a token carrying
-   `read:packages`:
+Домен приложения — `sova.1uup.ru`; Keycloak использует `auth.sova.1uup.ru`.
+
+Compose-проект, сеть и volumes для production отделены от dev-окружения.
+
+Никакие production-секреты или учетные данные GitHub не хранятся в Git.
+
+## Первоначальная настройка
+
+1. Направьте обе DNS A-записи на `77.91.114.59` и откройте TCP-порты 80/443 и UDP-порт 443.
+
+2. На сервере заполните `/srv/docker/sova.1uup.ru/.env.prod` на основе [`.env.prod.example`](*.env.prod.example*) и установите для файла права `600`.
+
+   Укажите все пароли, SMTP-учетные данные и пароль в `DATABASE_URL` в URL-кодированном виде.
+
+   Файл использует совместимый с shell синтаксис `KEY=VALUE`; специальные символы заключайте в кавычки.
+
+   Устанавливайте `TELEGRAM_BOT_TOKEN` только в том случае, если должен запускаться сервис Telegram polling.
+
+3. Если пакеты GHCR приватные, один раз выполните вход от имени пользователя `deploy`, используя токен с правом `read:packages`:
 
    ```bash
    read -rsp 'GHCR token: ' GHCR_TOKEN && echo
@@ -22,54 +30,86 @@ No production secrets or GitHub credentials are committed to Git.
    unset GHCR_TOKEN
    ```
 
-4. Create a dedicated SSH key for the `sova-infra` GitHub Actions workflow.
-   Add only its public key to `/home/deploy/.ssh/authorized_keys`; store its
-   private key as the `PROD_SSH_KEY` secret in the `production` environment of
-   the `sova-infra` repository. The workflow pins the server's ED25519 host key
-   in `.github/known_hosts.prod`. Restrict who may create production tags or
-   approve that environment according to your GitHub access policy.
+4. Создайте отдельный SSH-ключ для GitHub Actions workflow репозитория `sova-infra`.
 
-The production server does not need Git access to the private infra repository.
-GitHub Actions transfers the exact contents of each infra tag into
-`/srv/docker/sova.1uup.ru/releases/<tag>` and runs `deploy-prod.sh` there.
-The server-only `.env.prod` stays outside release directories.
+   Добавьте **только его публичный ключ** в `/home/deploy/.ssh/authorized_keys`, а приватный ключ сохраните как секрет `PROD_SSH_KEY` в environment `production` репозитория `sova-infra`.
 
-## Release
+   Workflow фиксирует ED25519 host key сервера в `.github/known_hosts.prod`.
 
-1. Create a `vMAJOR.MINOR.PATCH` Git tag in `sova-backend` and `sova-frontend`.
-   Their separate `publish-release.yml` workflows verify and publish
-   `ghcr.io/abat-voix/sova-backend:<tag>` and
-   `ghcr.io/abat-voix/sova-frontend:<tag>`. Wait for both workflows to succeed.
-2. Set `BACKEND_TAG` and `FRONTEND_TAG` in `release.prod.env` in `sova-infra`.
-   They may be different versions. Commit the file; keep secrets in the
-   server-only `.env.prod`.
-3. Merge the version change into `sova-infra/develop`, update your local
-   `develop`, then publish its own `vMAJOR.MINOR.PATCH` release tag with one
-   command:
+   Ограничьте права на создание production-тегов и подтверждение environment в соответствии с вашей политикой доступа GitHub.
+
+Production-серверу не требуется доступ через Git к приватному infra-репозиторию.
+
+GitHub Actions передает точное содержимое каждого infra-тега в:
+
+`/srv/docker/sova.1uup.ru/releases/<tag>`
+
+и запускает там `deploy-prod.sh`.
+
+Серверный файл `.env.prod` остается за пределами директорий релизов.
+
+## Релиз
+
+1. Создайте Git-тег формата `vMAJOR.MINOR.PATCH` в `sova-backend` и `sova-frontend`.
+
+   Их отдельные workflow `publish-release.yml` выполняют проверку и публикуют:
+
+   `ghcr.io/abat-voix/sova-backend:<tag>`
+
+   и
+
+   `ghcr.io/abat-voix/sova-frontend:<tag>`
+
+   Дождитесь успешного завершения обоих workflow.
+
+2. Укажите `BACKEND_TAG` и `FRONTEND_TAG` в файле `release.prod.env` репозитория `sova-infra`.
+
+   Версии backend и frontend могут отличаться.
+
+   Закоммитьте файл; секреты должны оставаться только в серверном `.env.prod`.
+
+3. Влейте изменение версий в `sova-infra/develop`, обновите локальную ветку `develop`, а затем одной командой опубликуйте собственный release-тег формата `vMAJOR.MINOR.PATCH`:
 
    ```bash
    ./scripts/tag-prod-release.sh v1.2.3
    ```
 
-   `deploy-release-prod.yml` uploads that infra snapshot and deploys it. The
-   command refuses uncommitted changes or a branch that differs from remote
-   `develop`.
+   `deploy-release-prod.yml` загрузит соответствующий snapshot инфраструктуры и выполнит его развертывание.
 
-The deployment validates configuration and image tags, backs up existing
-PostgreSQL databases, pulls images, starts dependencies, applies Django
-migrations, checks file storage, collects static files, validates Caddy,
-updates the stack and checks `/api/health/`. A failed step stops the workflow.
-Backups are in `/srv/docker/sova.1uup.ru/backups` and need off-server retention.
-If `STORAGE_BACKEND=filesystem`, back up the `django_media` volume separately;
-database dumps do not contain uploaded files. If S3 is used, back up that
-bucket through the storage provider's backup mechanism.
+   Команда откажется выполняться при наличии незакоммиченных изменений или если локальная ветка отличается от удаленной `develop`.
 
-Tags are immutable release identifiers. To roll back application images,
-commit previous image tags to `release.prod.env`, merge them into `develop`,
-and create a **new** infra release tag. Database changes may need a restore
-from backup if migrations are not backward compatible.
+В процессе развертывания выполняются:
 
-For a manual retry of an existing release on the server:
+- проверка конфигурации и тегов образов;
+- резервное копирование существующих баз PostgreSQL;
+- загрузка Docker-образов;
+- запуск зависимостей;
+- применение Django migrations;
+- проверка файлового хранилища;
+- сбор статических файлов;
+- проверка конфигурации Caddy;
+- обновление стека;
+- проверка `/api/health/`.
+
+При ошибке на любом из этапов workflow останавливается.
+
+Резервные копии находятся в:
+
+`/srv/docker/sova.1uup.ru/backups`
+
+Для них необходимо организовать хранение копий за пределами этого сервера.
+
+Если используется `STORAGE_BACKEND=filesystem`, отдельно создавайте резервную копию volume `django_media`: дампы базы данных не содержат загруженные пользователями файлы.
+
+Если используется S3, создавайте резервную копию соответствующего bucket с помощью механизма резервного копирования вашего storage-провайдера.
+
+Теги являются неизменяемыми идентификаторами релизов.
+
+Чтобы откатить образы приложения, укажите предыдущие теги образов в `release.prod.env`, закоммитьте изменения, влейте их в `develop`, а затем создайте **новый** infra release tag.
+
+При изменениях базы данных может потребоваться восстановление из резервной копии, если миграции не являются обратно совместимыми.
+
+Для ручного повторного запуска существующего релиза на сервере используйте:
 
 ```bash
 SOVA_PROD_ENV_FILE=/srv/docker/sova.1uup.ru/.env.prod \
