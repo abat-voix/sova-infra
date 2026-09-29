@@ -14,14 +14,22 @@
 		file_server
 	}
 
-	handle_path /media/* {
-		root * /srv/media
-		file_server
-	}
+	# Вложения, файлы договоров и отчёты не отдаются напрямую из тома: только через
+	# авторизованные .../download/ эндпоинты API — см.
+	# sova-backend/docs/plans/2026-09-23-s3-storage.md.
 
 	@backend_routes path /api /api/* /admin /admin/*
 	handle @backend_routes {
 		reverse_proxy backend:8000 {
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Host {host}
+			header_up X-Forwarded-Proto {scheme}
+		}
+	}
+
+	@websocket_routes path /ws /ws/*
+	handle @websocket_routes {
+		reverse_proxy realtime:8000 {
 			header_up X-Real-IP {remote_host}
 			header_up X-Forwarded-Host {host}
 			header_up X-Forwarded-Proto {scheme}
@@ -34,5 +42,22 @@
 			header_up X-Forwarded-Host {host}
 			header_up X-Forwarded-Proto {scheme}
 		}
+	}
+}
+
+{$AUTH_DOMAIN:auth.dev.sova.1uup.ru} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	reverse_proxy keycloak:8080 {
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto {scheme}
 	}
 }

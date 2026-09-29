@@ -1,4 +1,4 @@
-name: sova
+name: dev-sova-1uup-ru
 
 services:
   frontend:
@@ -24,25 +24,74 @@ services:
   backend:
     image: ghcr.io/abat-voix/sova-backend:${BACKEND_TAG:-dev}
     restart: unless-stopped
-    environment:
+    environment: &backend-environment
       ENVIRONMENT: ${ENVIRONMENT:-development}
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
+      CHANNEL_REDIS_URL: ${CHANNEL_REDIS_URL:-redis://redis:6379/2}
+      REALTIME_MAX_CONNECTION_AGE_SECONDS: ${REALTIME_MAX_CONNECTION_AGE_SECONDS:-1800}
+      REALTIME_CHANNEL_CAPACITY: ${REALTIME_CHANNEL_CAPACITY:-100}
+      CELERY_TASK_ALWAYS_EAGER: "false"
+      REPORTS_STORAGE_ROOT: /app/private/reports
+      REPORTS_RETENTION_HOURS: ${REPORTS_RETENTION_HOURS:-72}
+      REPORTS_JOB_TIMEOUT_SECONDS: ${REPORTS_JOB_TIMEOUT_SECONDS:-1800}
+      REPORTS_MAX_ATTEMPTS: ${REPORTS_MAX_ATTEMPTS:-3}
+      REPORTS_PDF_MAX_ROWS: ${REPORTS_PDF_MAX_ROWS:-5000}
+      REPORTS_XLS_MAX_SHEETS: ${REPORTS_XLS_MAX_SHEETS:-4}
+      REPORTS_MAX_ACTIVE_JOBS_PER_USER: ${REPORTS_MAX_ACTIVE_JOBS_PER_USER:-5}
+      # Хранилище файлов: filesystem (тома ниже) или s3 (свой Garage — compose.s3.yml — либо
+      # внешний провайдер). См. sova-backend/docs/plans/2026-09-23-s3-storage.md.
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-filesystem}
+      S3_DOWNLOAD_MODE: ${S3_DOWNLOAD_MODE:-proxy}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-http://s3:3900}
+      S3_REGION: ${S3_REGION:-garage}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_MEDIA_BUCKET: ${S3_MEDIA_BUCKET:-sova-media}
+      S3_REPORTS_BUCKET: ${S3_REPORTS_BUCKET:-sova-reports}
+      GOTENBERG_URL: ${GOTENBERG_URL:-http://gotenberg:3000}
+      GOTENBERG_TIMEOUT: ${GOTENBERG_TIMEOUT:-30}
       DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?Set DJANGO_SECRET_KEY in .env}
       DJANGO_DEBUG: ${DJANGO_DEBUG:-false}
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-dev.sova.1uup.ru}
       CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-https://dev.sova.1uup.ru}
       STATIC_ROOT: ${STATIC_ROOT:-/app/staticfiles}
       MEDIA_ROOT: ${MEDIA_ROOT:-/app/media}
+      EMAIL_HOST: ${EMAIL_HOST:-}
+      EMAIL_PORT: ${EMAIL_PORT:-465}
+      EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+      EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      EMAIL_USE_SSL: ${EMAIL_USE_SSL:-true}
+      EMAIL_USE_TLS: ${EMAIL_USE_TLS:-false}
+      DEFAULT_FROM_EMAIL: ${DEFAULT_FROM_EMAIL:-СОВА <noreply@1uup.ru>}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+      TELEGRAM_PROXY: ${TELEGRAM_PROXY:-}
+      NOTIFICATION_HTTP_TIMEOUT: ${NOTIFICATION_HTTP_TIMEOUT:-10}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-https://dev.sova.1uup.ru}
+      KEYCLOAK_PUBLIC_URL: ${KEYCLOAK_PUBLIC_URL:-https://auth.dev.sova.1uup.ru}
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-sova}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-sova-web}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
+      SESSION_COOKIE_AGE: ${SESSION_COOKIE_AGE:-28800}
+      PD_ENCRYPTION_KEYS: ${PD_ENCRYPTION_KEYS:-}
+      PD_HASH_KEY: ${PD_HASH_KEY:-}
     expose:
       - "8000"
     volumes:
       - django_static:/app/staticfiles
       - django_media:/app/media
+      - reports_data:/app/private/reports
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      gotenberg:
         condition: service_healthy
     networks:
       - sova
@@ -51,11 +100,104 @@ services:
         - CMD
         - python
         - -c
-        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=3)"
+        - "import urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/api/health/', headers={'Host':'dev.sova.1uup.ru'}); urllib.request.urlopen(r, timeout=3)"
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+
+  reports-worker:
+    image: ghcr.io/abat-voix/sova-backend:${BACKEND_TAG:-dev}
+    command: ["celery", "-A", "sova", "worker", "--loglevel=INFO", "--concurrency=${REPORTS_WORKER_CONCURRENCY:-2}"]
+    restart: unless-stopped
+    environment: *backend-environment
+    volumes:
+      - reports_data:/app/private/reports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      gotenberg:
+        condition: service_healthy
+    networks:
+      - sova
+    healthcheck:
+      disable: true
+    stop_grace_period: 32m
+    security_opt:
+      - no-new-privileges:true
+
+  telegram-bot:
+    image: ghcr.io/abat-voix/sova-backend:${BACKEND_TAG:-dev}
+    command: ["python", "manage.py", "telegram_poll_updates"]
+    restart: unless-stopped
+    environment: *backend-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - sova
+    healthcheck:
+      disable: true
+    security_opt:
+      - no-new-privileges:true
+
+  realtime:
+    image: ghcr.io/abat-voix/sova-backend:${BACKEND_TAG:-dev}
+    command: ["daphne", "-b", "0.0.0.0", "-p", "8000", "sova.asgi:application"]
+    restart: unless-stopped
+    environment: *backend-environment
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sova
+    healthcheck:
+      test: ["CMD", "python", "-m", "sova.realtime.healthcheck"]
+      interval: 30s
+      timeout: 8s
+      retries: 5
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+
+  reports-beat:
+    image: ghcr.io/abat-voix/sova-backend:${BACKEND_TAG:-dev}
+    command: ["celery", "-A", "sova", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat-schedule"]
+    restart: unless-stopped
+    environment: *backend-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sova
+    healthcheck:
+      disable: true
+    security_opt:
+      - no-new-privileges:true
+
+  gotenberg:
+    image: gotenberg/gotenberg:8.37.0-chromium
+    restart: unless-stopped
+    expose:
+      - "3000"
+    networks:
+      - sova
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
     security_opt:
       - no-new-privileges:true
 
@@ -96,11 +238,112 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  keycloak-postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${KEYCLOAK_DB:-keycloak}
+      POSTGRES_USER: ${KEYCLOAK_DB_USER:-keycloak}
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD in .env}
+    volumes:
+      - keycloak_postgres_data:/var/lib/postgresql/data
+    networks:
+      - sova
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.4
+    restart: unless-stopped
+    command: ["start", "--import-realm"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL_HOST: keycloak-postgres
+      KC_DB_URL_DATABASE: ${KEYCLOAK_DB:-keycloak}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER:-keycloak}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Set KEYCLOAK_DB_PASSWORD in .env}
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-https://auth.dev.sova.1uup.ru}
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_METRICS_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      SOVA_APP_URL: ${APP_PUBLIC_URL:-https://dev.sova.1uup.ru}
+      SOVA_OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-https://dev.sova.1uup.ru/api/auth/oidc/callback/}
+      SOVA_KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-sova-web}
+      SOVA_KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
+      SOVA_SMTP_HOST: ${EMAIL_HOST:-}
+      SOVA_SMTP_PORT: ${EMAIL_PORT:-465}
+      SOVA_SMTP_USER: ${EMAIL_HOST_USER:-}
+      SOVA_SMTP_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+      SOVA_SMTP_FROM: ${KEYCLOAK_EMAIL_FROM:-noreply@1uup.ru}
+      SOVA_SMTP_SSL: ${EMAIL_USE_SSL:-true}
+      SOVA_SMTP_STARTTLS: ${EMAIL_USE_TLS:-false}
+    expose:
+      - "8080"
+      - "9000"
+    volumes:
+      - ./keycloak/sova-realm.json:/opt/keycloak/data/import/sova-realm.json:ro
+      - ./keycloak/themes/sova:/opt/keycloak/themes/sova:ro
+      - ./scripts/configure-keycloak-theme.sh:/opt/keycloak/configure-keycloak-theme.sh:ro
+    depends_on:
+      keycloak-postgres:
+        condition: service_healthy
+    networks:
+      - sova
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -c
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000 &&
+          printf 'HEAD /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
+          grep -q 'HTTP/1.1 200' <&3
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    security_opt:
+      - no-new-privileges:true
+
+  keycloak-test-user-bootstrap:
+    image: quay.io/keycloak/keycloak:26.7.4
+    profiles: ["test-data"]
+    entrypoint: ["/bin/bash", "/opt/keycloak/bootstrap-test-users.sh"]
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      SEED_TEST_ACCOUNTS: ${SEED_TEST_ACCOUNTS:-false}
+      KEYCLOAK_SERVER_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-sova}
+      KEYCLOAK_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      TEST_KAM_PASSWORD: ${TEST_KAM_PASSWORD:-}
+      TEST_BOSS_PASSWORD: ${TEST_BOSS_PASSWORD:-}
+      TEST_ADMIN_PASSWORD: ${TEST_ADMIN_PASSWORD:-}
+    volumes:
+      - ./scripts/bootstrap-test-users.sh:/opt/keycloak/bootstrap-test-users.sh:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    networks:
+      - sova
+    security_opt:
+      - no-new-privileges:true
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:-dev.sova.1uup.ru}
+      AUTH_DOMAIN: ${AUTH_DOMAIN:-auth.dev.sova.1uup.ru}
     ports:
       - "80:80"
       - "443:443"
@@ -110,11 +353,12 @@ services:
       - caddy_data:/data
       - caddy_config:/config
       - django_static:/srv/static:ro
-      - django_media:/srv/media:ro
     depends_on:
       frontend:
         condition: service_healthy
       backend:
+        condition: service_healthy
+      keycloak:
         condition: service_healthy
     networks:
       - sova
@@ -129,13 +373,15 @@ services:
 
 networks:
   sova:
-    name: sova
+    name: dev-sova-1uup-ru
     driver: bridge
 
 volumes:
   postgres_data:
   redis_data:
+  keycloak_postgres_data:
   caddy_data:
   caddy_config:
   django_static:
   django_media:
+  reports_data:

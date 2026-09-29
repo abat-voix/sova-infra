@@ -2,43 +2,66 @@
 
 СОВА — Система организации взаимодействия с академической средой.
 
-Этот репозиторий хранит инфраструктуру dev-стенда `https://dev.sova.1uup.ru`. Сервер не собирает приложение из исходников: он загружает готовые образы `sova-frontend` и `sova-backend` из GitHub Container Registry (GHCR).
+Этот репозиторий хранит Docker Compose-конфигурацию для локальной разработки,
+dev-стенда `https://dev.sova.1uup.ru` и production
+`https://sova.1uup.ru`. Серверы загружают готовые образы `sova-frontend` и
+`sova-backend` из GitHub Container Registry (GHCR); исходники приложения на них
+не собираются.
+
+- Локальный запуск: [`LOCAL_SETUP.md`](LOCAL_SETUP.md).
+- Dev-стенд: разделы ниже, `.env` и `compose.dev.yml`.
+- Production: [«Production»](#production) и [`PRODUCTION.md`](PRODUCTION.md);
+  серверный `.env.prod`, `release.prod.env` и `compose.prod.yml`.
+- Полностью закрытый контур: [«Закрытый контур»](#закрытый-контур).
 
 ## Architecture
 
 ```text
-                    Internet
-                       |
-                       v
-                    Caddy
-                       |
-             +---------+---------+
-             |                   |
-             v                   v
-          Next.js              Django
-         frontend              backend
-                                  |
-                         +--------+--------+
-                         |                 |
-                         v                 v
-                     PostgreSQL          Redis
+Браузер -> Caddy -> frontend / backend / realtime / Keycloak
+                       backend -> PostgreSQL, Redis, Gotenberg, reports_data
+                       telegram-bot -> Telegram Bot API, PostgreSQL
+                       realtime (Daphne) -> PostgreSQL, Redis Channels DB 2
+                       reports-worker -> PostgreSQL, Redis, Gotenberg, reports_data
+                       reports-beat -> Redis -> reports-worker (cleanup task)
+                       Keycloak -> Keycloak PostgreSQL
 ```
 
-Caddy — единственная публичная точка входа. Он завершает TLS и направляет запросы к сервисам во внутренней Docker-сети:
+Caddy — единая точка входа. Он завершает TLS и направляет запросы к сервисам во внутренней Docker-сети:
 
 - `/api/*` и `/admin/*` → `backend:8000`;
+- `/ws/*` → `realtime:8000` (Daphne/ASGI);
 - `/static/*` → Django static volume;
-- `/media/*` → Django media volume;
 - все остальные пути → `frontend:3000`.
 
-PostgreSQL, Redis, Django и Next.js не публикуют порты на хосте. Данные PostgreSQL, Redis, Caddy, static и media хранятся в named volumes. WebSocket-соединения поддерживаются `reverse_proxy` Caddy автоматически.
+Вложения, файлы договоров и отчёты Caddy не отдаёт: они идут через авторизованные
+`.../download/` эндпоинты API (`visible_interactions`) — см. раздел «Хранилище файлов» ниже
+и `sova-backend/docs/plans/2026-09-23-s3-storage.md`.
 
-## Server requirements
+PostgreSQL, Redis, Gotenberg, Django и Next.js не публикуют порты на хосте.
+Gotenberg доступен backend и worker во внутренней Docker-сети и преобразует HTML
+отчётов в PDF через Chromium. Данные PostgreSQL, Redis, Caddy, static и media
+хранятся в named volumes. WebSocket-соединения поддерживаются `reverse_proxy`
+Caddy автоматически.
+
+Экспорт отчётов выполняет отдельный Celery worker, а Celery beat ежечасно ставит
+задачу очистки просроченных файлов. API и worker используют приватный named volume
+`reports_data` (`/app/private/reports`); Caddy не монтирует и не публикует его.
+Скачивание отчёта проходит через авторизованный API.
+
+Keycloak доступен через `https://auth.dev.sova.1uup.ru` на dev и
+`https://auth.sova.1uup.ru` на production; его application и management-порты
+на хосте не публикуются. Realm `sova` импортируется при первом
+старте, а Django использует confidential client `sova-web` и server-side OIDC
+flow. Пользовательский браузер хранит только Django session cookie.
+
+## Dev server requirements
 
 - Linux-сервер с публичными TCP-портами 80 и 443 и UDP-портом 443;
 - DNS A/AAAA-запись `dev.sova.1uup.ru`, направленная на сервер;
+- DNS A/AAAA-запись `auth.dev.sova.1uup.ru`, направленная на тот же сервер;
 - Docker Engine и Docker Compose v2;
-- доступ сервера к `ghcr.io`;
+- доступ сервера к реестрам образов из `compose.yml` (в том числе `ghcr.io`
+  и `quay.io`);
 - достаточно диска для образов, базы, media и резервных копий.
 
 Установите Docker Engine и Compose plugin по официальной инструкции для дистрибутива. Добавьте операционного пользователя в группу `docker` или запускайте команды с подходящими правами. Убедитесь, что работают:
@@ -48,7 +71,7 @@ docker --version
 docker compose version
 ```
 
-## Initial setup
+## Dev initial setup
 
 ```bash
 git clone https://github.com/abat-voix/sova-infra.git
@@ -57,13 +80,55 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Заполните `.env`. Как минимум задайте сильные уникальные значения для `POSTGRES_PASSWORD`, `DATABASE_URL` и `DJANGO_SECRET_KEY`. Например, `DATABASE_URL` должен ссылаться на Docker-сервис PostgreSQL:
+Заполните `.env`. Как минимум задайте сильные уникальные значения для
+`POSTGRES_PASSWORD`, `DATABASE_URL`, `DJANGO_SECRET_KEY`,
+`KEYCLOAK_CLIENT_SECRET`, `KEYCLOAK_ADMIN_PASSWORD` и
+`KEYCLOAK_DB_PASSWORD`. Например, `DATABASE_URL` должен ссылаться на
+Docker-сервис PostgreSQL:
 
 ```dotenv
 DATABASE_URL=postgresql://sova:URL_ENCODED_PASSWORD@postgres:5432/sova
 ```
 
 Если пароль содержит специальные символы, URL-кодируйте их в `DATABASE_URL`. Не коммитьте `.env`: этот файл существует только на сервере.
+
+Для исходящей почты укажите `EMAIL_HOST`, полный адрес созданного ящика в
+`EMAIL_HOST_USER` и его отдельный пароль в `EMAIL_HOST_PASSWORD`. Без этих трёх
+переменных development-окружение продолжит работать, но письма будут выводиться
+в консоль контейнера. SMTP-поля нужно задавать либо все вместе, либо не задавать
+вовсе. В production все три переменные обязательны. Конфигурация по умолчанию
+использует порт `465` с SSL. Не включайте одновременно
+`EMAIL_USE_SSL` и `EMAIL_USE_TLS`.
+
+Эти же SMTP-параметры передаются в realm `sova` для подтверждения email и
+восстановления пароля. Если SMTP не настроен в development, первого тестового
+пользователя нужно создать в Admin Console с включённым `Email verified`.
+
+Client secret должен совпадать в Django и импортируемом realm; Compose передаёт
+одно значение `KEYCLOAK_CLIENT_SECRET` обоим сервисам. Realm import выполняется
+только если realm `sova` ещё не существует. Последующее изменение JSON или
+секрета в `.env` существующий realm автоматически не обновляет — такие
+изменения нужно применить через Keycloak Admin Console либо контролируемый
+повторный import.
+
+### Test accounts
+
+Dev deployment может автоматически создать три тестовые учётные записи в
+Keycloak: `test-kam`, `test-boss` и `test-admin`. Для этого задайте в серверном
+`.env`:
+
+```dotenv
+SEED_TEST_ACCOUNTS=true
+TEST_KAM_PASSWORD=<UNIQUE_SECRET>
+TEST_BOSS_PASSWORD=<UNIQUE_SECRET>
+TEST_ADMIN_PASSWORD=<UNIQUE_SECRET>
+```
+
+`scripts/deploy.sh` запускает идемпотентный bootstrap после готовности Keycloak.
+Отсутствующие пользователи создаются, а существующие включаются и получают имя,
+подтверждённый тестовый email и пароль из `.env`. Поэтому ручная смена пароля
+тестового аккаунта будет отменена следующим deployment. Bootstrap работает
+только при `ENVIRONMENT=development` и не назначает прикладные роли СОВА.
 
 ### GHCR authorization
 
@@ -78,7 +143,7 @@ unset GHCR_TOKEN
 
 `scripts/deploy.sh` также выполнит безопасный login через stdin, если одновременно переданы `GHCR_USERNAME` и `GHCR_TOKEN`. Токен не следует сохранять в `.env` или shell history.
 
-## First launch
+## Dev first launch
 
 Проверьте итоговую конфигурацию и запустите deploy:
 
@@ -87,7 +152,26 @@ docker compose -f compose.yml -f compose.dev.yml config
 ./scripts/deploy.sh
 ```
 
-Deploy загружает готовые образы, запускает PostgreSQL и Redis, ожидает их готовности, выполняет Django migrations и `collectstatic` в одноразовых контейнерах, а затем обновляет весь стек. Persistent volumes автоматически не удаляются.
+Deploy загружает готовые образы, запускает обе базы PostgreSQL, Redis, Gotenberg
+и Keycloak, ожидает их готовности, выполняет Django migrations и `collectstatic`
+в одноразовых контейнерах, проверяет Caddyfile, а затем обновляет весь стек,
+включая Daphne, Celery worker и beat. После обновления Caddy явно перечитывает
+bind-mounted конфигурацию. Persistent volumes автоматически не удаляются.
+
+Проверить WebSocket handshake и heartbeat на dev-стенде можно через
+`scripts/websocket-smoke.py`. Передайте ему `REALTIME_SMOKE_URL` и
+`REALTIME_SMOKE_SESSION_COOKIE` для действующей тестовой Django-сессии; cookie
+используется только в памяти процесса и не выводится. Переменная
+`REALTIME_SMOKE_ORIGIN` задаёт Origin, если он отличается от origin URL.
+Перед deploy экспортируйте оба обязательных значения в shell; не добавляйте
+session cookie в `.env`, командную строку или историю shell.
+
+Если healthcheck `realtime` не проходит, Compose показывает failed service, а
+`docker compose ps` и логи позволяют определить, сломан Daphne HTTP listener
+или round-trip к Redis DB 2. HTTP backend не зависит от `realtime` и остаётся
+доступен. Для отката верните предыдущий `BACKEND_TAG` и предыдущий Caddyfile,
+затем запустите deploy снова. Redis volume сохраняйте: отдельная миграция данных
+для Channels не требуется.
 
 Альтернативный ручной запуск без миграций:
 
@@ -99,7 +183,91 @@ docker compose -f compose.yml -f compose.dev.yml ps
 
 После первого запуска проверьте `https://dev.sova.1uup.ru` и health endpoint `https://dev.sova.1uup.ru/api/health/`.
 
-## Routine operations
+Затем откройте `https://auth.dev.sova.1uup.ru/admin/`, войдите bootstrap-admin
+учётной записью, переключитесь в realm `sova` и создайте первого пользователя.
+Для пользователя укажите email; realm требует подтверждение email. Bootstrap
+admin относится к служебному realm `master` и не является пользователем СОВА.
+
+## Local development
+
+Локально frontend и backend запускаются обычными командами из их репозиториев,
+а вся инфраструктура — PostgreSQL приложения, Redis, Gotenberg, Keycloak и
+PostgreSQL Keycloak — поднимается из `compose.local.yml`. Этот файл использует собственный
+env-файл `.env.local`; не путайте его с `.env`, который описывает dev-стенд и
+существует только на сервере.
+
+```bash
+cp .env.local.example .env.local
+chmod 600 .env.local
+# заполните POSTGRES_PASSWORD, KEYCLOAK_CLIENT_SECRET,
+# KEYCLOAK_ADMIN_PASSWORD и KEYCLOAK_DB_PASSWORD
+docker compose --env-file .env.local -f compose.local.yml up -d
+docker compose --env-file .env.local -f compose.local.yml ps
+```
+
+Все порты публикуются только на `127.0.0.1`:
+
+| Сервис | Адрес | Переменная порта |
+| --- | --- | --- |
+| PostgreSQL приложения | `localhost:5432`, база `sova` | `POSTGRES_HOST_PORT` |
+| Redis | `localhost:6379` | `REDIS_HOST_PORT` |
+| Gotenberg | `http://localhost:3001` | `GOTENBERG_HOST_PORT` |
+| Keycloak | `http://localhost:8080` | `KEYCLOAK_HOST_PORT` |
+| PostgreSQL Keycloak | не публикуется | — |
+
+Если порт занят другим проектом, переопределите соответствующую `*_HOST_PORT` в
+`.env.local` и синхронно поправьте `DATABASE_URL`/`REDIS_URL` в
+`sova-backend/.env`. Изменение `KEYCLOAK_HOST_PORT` автоматически меняет
+`KC_HOSTNAME`, а `FRONTEND_HOST_PORT` — `rootUrl` и redirect URI клиента
+`sova-web` в импортируемом realm.
+
+Затем в `sova-backend/.env` укажите:
+
+```dotenv
+DATABASE_URL=postgresql://sova:<POSTGRES_PASSWORD>@localhost:5432/sova
+REDIS_URL=redis://localhost:6379/0
+CELERY_BROKER_URL=redis://localhost:6379/1
+CHANNEL_REDIS_URL=redis://localhost:6379/2
+REALTIME_MAX_CONNECTION_AGE_SECONDS=1800
+GOTENBERG_URL=http://localhost:3001
+KEYCLOAK_CLIENT_SECRET=<то же значение, что в .env.local>
+```
+
+Client secret должен совпадать в обоих файлах: realm импортирует именно то
+значение, которое Django затем предъявляет на token endpoint.
+
+Для асинхронного экспорта отчётов в двух дополнительных терминалах из каталога
+`sova-backend` запустите `poetry run celery -A sova worker --loglevel=INFO` и
+`poetry run celery -A sova beat --loglevel=INFO`. Оба процесса используют
+`sova-backend/.env` и тот же локальный `REPORTS_STORAGE_ROOT`, что и Django.
+
+Для WebSocket запустите отдельный ASGI-процесс из каталога `sova-backend`:
+
+```bash
+poetry run daphne -b 0.0.0.0 -p 8001 sova.asgi:application
+```
+
+В `sova-frontend/.env.local` задайте
+`NEXT_PUBLIC_WS_URL=ws://localhost:8001/ws/events/`. Channels использует Redis DB
+2; DB 0 остаётся cache, DB 1 — Celery broker. На dev-стенде тот же процесс
+работает отдельным Compose-сервисом `realtime`.
+
+Realm разрешает callback через локальный Next.js proxy:
+`http://localhost:3000/api/auth/oidc/callback/`.
+
+Остановка без удаления данных:
+
+```bash
+docker compose --env-file .env.local -f compose.local.yml down
+```
+
+Полный сброс локальных баз, включая пользователей Keycloak:
+
+```bash
+docker compose --env-file .env.local -f compose.local.yml down --volumes
+```
+
+## Dev routine operations
 
 Обычное обновление приложения после публикации новых образов:
 
@@ -115,6 +283,7 @@ docker compose -f compose.yml -f compose.dev.yml ps
 docker compose -f compose.yml -f compose.dev.yml ps
 docker compose -f compose.yml -f compose.dev.yml logs -f
 docker compose -f compose.yml -f compose.dev.yml logs -f backend
+docker compose -f compose.yml -f compose.dev.yml logs -f reports-worker reports-beat
 ```
 
 Остановка контейнеров без удаления данных:
@@ -125,7 +294,7 @@ docker compose -f compose.yml -f compose.dev.yml down
 
 Не добавляйте `--volumes`, если удаление persistent data не является осознанным действием.
 
-## Backup
+## Dev backup
 
 Создать сжатый SQL backup PostgreSQL:
 
@@ -133,17 +302,66 @@ docker compose -f compose.yml -f compose.dev.yml down
 ./scripts/backup.sh
 ```
 
-Файл будет создан как `backups/sova_YYYY-MM-DD_HH-MM-SS.sql.gz` с правами только для текущего пользователя. Каталог `backups/` исключён из Git. Скопируйте backup в защищённое внешнее хранилище и настройте отдельную политику хранения и проверки восстановления.
+Будут созданы два файла:
 
-## Restore
+- `backups/sova_YYYY-MM-DD_HH-MM-SS.sql.gz`;
+- `backups/keycloak_YYYY-MM-DD_HH-MM-SS.sql.gz`.
+
+Оба файла создаются с правами только для текущего пользователя. Каталог
+`backups/` исключён из Git. Храните обе базы согласованно: Keycloak содержит
+пользователей и credentials, а SOVA — ссылки на Keycloak `sub`.
+
+При `STORAGE_BACKEND=s3` тот же запуск зеркалирует бакет вложений и договоров в
+`backups/s3/current/`; всё, что с прошлого запуска было в бакете удалено или заменено,
+переезжает в `backups/s3/deleted/<TIMESTAMP>/` (см. «Хранилище файлов» выше) и хранится
+`S3_BACKUP_DELETED_RETENTION_DAYS` дней (по умолчанию 90).
+
+## Dev restore
 
 Восстановление — явная ручная операция:
 
 ```bash
 ./scripts/restore.sh backups/sova_YYYY-MM-DD_HH-MM-SS.sql.gz
+./scripts/restore.sh backups/keycloak_YYYY-MM-DD_HH-MM-SS.sql.gz
 ```
 
-Скрипт проверяет gzip-файл, требует ввести `RESTORE` и запускает `psql` с остановкой при первой SQL-ошибке. Перед восстановлением сделайте актуальный backup и остановите запись приложения в базу (например, временно остановите `backend` и `frontend`). Restore никогда не запускается из deploy.
+Скрипт выбирает базу по имени файла, проверяет gzip, требует ввести `RESTORE` и
+запускает `psql` с остановкой при первой SQL-ошибке. Перед восстановлением
+сделайте актуальный backup и остановите запись приложения в обе базы (включая
+`backend`, `frontend` и `keycloak`). Restore никогда не запускается из deploy.
+
+Бакет вложений и договоров — из последнего зеркала или из конкретного удалённого снимка:
+
+```bash
+./scripts/restore.sh s3
+./scripts/restore.sh s3 backups/s3/deleted/YYYY-MM-DD_HH-MM-SS
+```
+
+Копирует файлы в бакет, не удаляя из него ничего лишнего (`rclone copy`), также требует `RESTORE`.
+
+## Хранилище файлов
+
+Вложения действий, файлы договоров и готовые отчёты хранятся через
+`STORAGE_BACKEND` (`filesystem` по умолчанию или `s3`). Подробности, все переменные и порядок
+переноса — в `sova-backend/docs/plans/2026-09-23-s3-storage.md`.
+
+`S3_PROVIDER` в `.env` выбирает, кто выступает S3:
+
+- `garage` (по умолчанию) — собственный сервис `s3` (`compose.s3.yml`, образ
+  `dxflrs/garage:v2.3.0`), `deploy.sh` поднимает его и настраивает
+  (`scripts/s3-bootstrap.sh`: layout, бакеты `S3_MEDIA_BUCKET`/`S3_REPORTS_BUCKET`,
+  ключ приложения) при каждом деплое — идемпотентно;
+- `external` — уже существующий S3-совместимый провайдер (Yandex Object Storage, AWS и т. п.):
+  `compose.s3.yml` не подключается, `S3_*` в `.env` указывают на него напрямую.
+
+`deploy.sh` перед запуском приложения выполняет
+`python manage.py check_storage --apply-lifecycle` — деплой останавливается, если хранилище
+недоступно. `backup.sh` при `STORAGE_BACKEND=s3` зеркалирует бакет `S3_MEDIA_BUCKET` в
+`backups/s3/` (см. раздел «Backup» — там же про `deleted/`, заменяющий отсутствующее в Garage
+версионирование); бакет отчётов не бэкапится — это временные файлы с TTL.
+
+Локальная разработка (`compose.local.yml`) поднимает Garage на `127.0.0.1:${S3_HOST_PORT:-3900}`
+так же, как Postgres/Redis/Gotenberg — см. `LOCAL_SETUP.md`.
 
 ## Requirements for application repositories
 
@@ -155,19 +373,22 @@ docker compose -f compose.yml -f compose.dev.yml down
 - Image должен содержать Node.js с поддержкой `fetch`, используемого healthcheck.
 - Приложение должно корректно работать за reverse proxy и использовать относительный `/api` либо публичный origin `https://dev.sova.1uup.ru`.
 - Контейнер следует запускать от непривилегированного пользователя, определённого в Dockerfile.
-- GitHub Actions frontend-репозитория должен собирать, проверять и публиковать образ в GHCR; сервер не должен собирать frontend. Workflow публикации создаёт теги `dev` и `sha-<commit>`.
+- GitHub Actions frontend-репозитория собирает, проверяет и публикует образ в GHCR: push в `develop` создаёт теги `dev` и `sha-<commit>`, а Git-тег `vMAJOR.MINOR.PATCH` — одноимённый релизный образ.
 
 ### `sova-backend`
 
 - Dockerfile должен собирать production image, опубликованный как `ghcr.io/abat-voix/sova-backend:<tag>`.
 - Контейнер должен слушать `0.0.0.0:8000` через production WSGI/ASGI server (например, Gunicorn/Uvicorn), а не `runserver`.
 - Настройки должны читать `DATABASE_URL`, `REDIS_URL`, `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `DJANGO_DEBUG`, `STATIC_ROOT` и `MEDIA_ROOT`.
+- Для генерации PDF backend должен читать `GOTENBERG_URL` и обращаться к Gotenberg только через внутреннюю Docker-сеть.
+- Celery worker и beat должны запускаться из того же backend-образа и использовать `CELERY_BROKER_URL` и `REPORTS_STORAGE_ROOT`.
+- OIDC-настройки должны читать `APP_PUBLIC_URL`, `KEYCLOAK_PUBLIC_URL`, `KEYCLOAK_INTERNAL_URL`, `KEYCLOAK_REALM`, `KEYCLOAK_CLIENT_ID` и `KEYCLOAK_CLIENT_SECRET`.
 - Должен существовать неаутентифицированный лёгкий endpoint `GET /api/health/`, возвращающий успешный HTTP-код после готовности процесса.
-- `collectstatic` должен складывать файлы в `/app/staticfiles`; загружаемые media — в `/app/media`. Оба пути являются persistent volumes и доступны Caddy только для чтения.
+- `collectstatic` должен складывать файлы в `/app/staticfiles`; загружаемые media — в `/app/media`. Оба пути являются persistent volumes, но Caddy монтирует только static volume: media выдаются через авторизованный API.
 - При работе за proxy Django должен доверять `X-Forwarded-Proto` от Caddy (обычно `SECURE_PROXY_SSL_HEADER`) и корректно определять HTTPS.
 - Миграции должны поддерживать `python manage.py migrate --noinput` и быть обратно совместимыми при rolling-style обновлении.
 - Контейнер следует запускать от непривилегированного пользователя, определённого в Dockerfile, с правами записи в static/media volumes.
-- GitHub Actions backend-репозитория должен собирать, проверять и публиковать образ в GHCR; сервер не должен собирать backend. Workflow публикации создаёт теги `dev` и `sha-<commit>`.
+- GitHub Actions backend-репозитория собирает, проверяет и публикует образ в GHCR: push в `develop` создаёт теги `dev` и `sha-<commit>`, а Git-тег `vMAJOR.MINOR.PATCH` — одноимённый релизный образ.
 
 ## Troubleshooting
 
@@ -181,11 +402,14 @@ docker compose -f compose.yml -f compose.dev.yml config
 
 ```bash
 docker compose -f compose.yml -f compose.dev.yml ps
-docker inspect --format '{{json .State.Health}}' sova-backend-1
+docker inspect --format '{{json .State.Health}}' dev-sova-1uup-ru-backend-1
 docker compose -f compose.yml -f compose.dev.yml logs --tail=200 backend
+docker compose -f compose.yml -f compose.dev.yml logs --tail=200 realtime
+docker compose -f compose.yml -f compose.dev.yml logs --tail=200 reports-worker reports-beat
+docker compose -f compose.yml -f compose.dev.yml logs --tail=200 keycloak
 ```
 
-Если Caddy не получает сертификат, проверьте DNS, доступность портов 80/443, firewall и логи `caddy`. Если образы не загружаются, проверьте точность тегов и `docker login ghcr.io`. Если миграции падают, контейнеры приложения не обновляются, а ошибка возвращается вызывающему shell.
+Если Caddy не получает сертификат, проверьте DNS, доступность портов 80/443, firewall и логи `caddy`. Если WebSocket отвечает 502, проверьте состояние `realtime`, `CHANNEL_REDIS_URL` (Redis DB 2) и загрузите конфигурацию командой `docker compose ... exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`. Если образы не загружаются, проверьте точность тегов и `docker login ghcr.io`. Если миграции падают, контейнеры приложения не обновляются, а ошибка возвращается вызывающему shell.
 
 Для повторного сбора static после обновления backend (если image не выполняет это на старте):
 
@@ -195,12 +419,63 @@ docker compose -f compose.yml -f compose.dev.yml run --rm backend python manage.
 
 ## Security notes
 
-- Секреты находятся только в серверном `.env`; сертификаты Caddy — в named volume.
-- Stateful images закреплены на major version (`postgres:17-alpine`, `redis:7-alpine`), а Caddy — на `caddy:2-alpine`. Перед major upgrade нужен отдельный план миграции.
+- Секреты находятся только в серверных `.env` (dev) или `.env.prod` (production);
+  `release.prod.env` содержит только теги образов. Сертификаты Caddy — в named volume.
+- PostgreSQL и Redis закреплены на major version, Caddy — на major, а Gotenberg
+  и Keycloak — на точных security-patch версиях. Перед обновлением Keycloak
+  нужно проверить его migration guide и сделать backup обеих баз.
 - `no-new-privileges` включён для всех сервисов; приложение должно задавать непривилегированного пользователя внутри собственных Dockerfile.
-- Не публикуйте PostgreSQL, Redis или application ports и не добавляйте секреты в Compose-файлы.
+- Не публикуйте PostgreSQL, Redis, Gotenberg или application ports и не добавляйте секреты в Compose-файлы.
 - Эта конфигурация сама по себе не обеспечивает соответствие 152-ФЗ, требованиям ФСТЭК или другим режимам регулирования. Такое соответствие требует отдельного комплекса организационных и технических мер.
 
-## Production extension
+## Production
 
-Для production добавьте отдельный `compose.prod.yml`, production domain и отдельный `.env`, не меняя базовый `compose.yml`. Не используйте dev и production с одним Compose project name или общими volumes на одном хосте.
+Production уже настроен отдельно от dev: `compose.prod.yml` задаёт собственный
+Compose project, сеть и volumes; секреты лежат только на сервере в
+`/srv/docker/sova.1uup.ru/.env.prod`. Теги готовых образов хранятся в
+`release.prod.env` и могут различаться для frontend и backend.
+
+Порядок обновления:
+
+1. Опубликуйте Git-теги `vMAJOR.MINOR.PATCH` в `sova-backend` и
+   `sova-frontend`; дождитесь успешной публикации обоих образов в GHCR.
+2. Обновите `BACKEND_TAG` и `FRONTEND_TAG` в `release.prod.env`, закоммитьте
+   изменение и влейте его в `sova-infra/develop`.
+3. Обновите локальную ветку `develop` репозитория `sova-infra` и выполните:
+
+   ```bash
+   ./scripts/tag-prod-release.sh v1.2.3
+   ```
+
+Тег `sova-infra` запускает GitHub Actions: workflow передаёт снимок infra-тега
+на сервер по SSH и вызывает `scripts/deploy-prod.sh`. Скрипт проверяет настройки,
+сохраняет дампы существующих баз, загружает образы, выполняет миграции и проверку
+работоспособности. Серверный `.env.prod` не входит в Git. Подготовка сервера,
+откат, резервные копии и ручной повтор запуска описаны в [`PRODUCTION.md`](PRODUCTION.md).
+
+Не запускайте `scripts/deploy.sh` для production: он использует dev-файл `.env`
+и `compose.dev.yml`.
+
+## Закрытый контур
+
+Текущий production workflow рассчитан на сетевой доступ: GitHub Actions
+подключается к серверу по SSH, а `deploy-prod.sh` выполняет `docker compose pull`.
+Поэтому полностью автономное обновление из архива пока не реализовано.
+
+На целевом сервере должны быть заранее установлены Docker Engine и Compose.
+Для установки без интернета потребуется отдельный пакет релиза: снимок
+`sova-infra` нужного тега и образы frontend, backend, PostgreSQL, Redis,
+Gotenberg, Keycloak и Caddy; при использовании Garage — также его образ.
+Образы следует подготовить под архитектуру целевого сервера, экспортировать
+через `docker save`, перенести в контур и загрузить через `docker load`.
+Отдельный офлайн-скрипт должен пропускать `pull`, а затем выполнять те же
+миграции и проверки, что production deploy.
+
+Внутри контура также нужны DNS для приложения и Keycloak, доверенный клиентам
+TLS-сертификат и доступный SMTP-сервер: production требует SMTP-настройки,
+а realm Keycloak подтверждает email. При отсутствии выхода в интернет
+Telegram-уведомления и внешние интеграции недоступны; карта организаций
+использует тайлы OpenStreetMap и потребует внутренний источник тайлов.
+Текущие публичные домены, сертификаты и проверку HTTPS после deploy нужно
+адаптировать под адреса контура. При переносе существующей инсталляции
+дополнительно переносятся обе базы и файловое хранилище, а не только образы.

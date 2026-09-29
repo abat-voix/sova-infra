@@ -1,0 +1,39 @@
+name: prod-sova-1uup-ru
+
+services:
+  telegram-bot:
+    profiles: ["telegram"]
+
+  backend:
+    environment:
+      ENVIRONMENT: production
+      DJANGO_DEBUG: "false"
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?Set DJANGO_ALLOWED_HOSTS in .env.prod}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:?Set CSRF_TRUSTED_ORIGINS in .env.prod}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:?Set APP_PUBLIC_URL in .env.prod}
+      KEYCLOAK_PUBLIC_URL: ${KEYCLOAK_PUBLIC_URL:?Set KEYCLOAK_PUBLIC_URL in .env.prod}
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; r=urllib.request.Request('http://127.0.0.1:8000/api/health/', headers={'Host':'${DOMAIN:?Set DOMAIN in .env.prod}'}); urllib.request.urlopen(r, timeout=3)"
+
+  realtime:
+    healthcheck:
+      timeout: 20s
+
+  keycloak:
+    environment:
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:?Set KEYCLOAK_PUBLIC_URL in .env.prod}
+      SOVA_APP_URL: ${APP_PUBLIC_URL:?Set APP_PUBLIC_URL in .env.prod}
+      SOVA_OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:?Set OIDC_REDIRECT_URI in .env.prod}
+
+  caddy:
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN in .env.prod}
+      AUTH_DOMAIN: ${AUTH_DOMAIN:?Set AUTH_DOMAIN in .env.prod}
+
+networks:
+  sova:
+    name: prod-sova-1uup-ru
