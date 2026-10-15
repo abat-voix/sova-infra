@@ -40,6 +40,12 @@ COMPOSE_PROFILES=()
 if [[ -n "${TELEGRAM_BOT_TOKEN:-}" ]]; then
   COMPOSE_PROFILES=(--profile telegram)
 fi
+# EDGE_CADDY_DIR — общий edge-Caddy сервера (например /srv/docker/edge): маршруты sova
+# кладутся в его sites/sova.caddy. Пусто — sova сама публикует 80/443 своим Caddy.
+readonly EDGE_CADDY_DIR="${EDGE_CADDY_DIR:-}"
+if [[ -z "${EDGE_CADDY_DIR}" ]]; then
+  COMPOSE_PROFILES+=(--profile self-proxy)
+fi
 if [[ "${STORAGE_BACKEND:-filesystem}" == s3 ]]; then
   required_s3=(S3_ENDPOINT_URL S3_REGION S3_ACCESS_KEY_ID S3_SECRET_ACCESS_KEY
                S3_MEDIA_BUCKET S3_REPORTS_BUCKET)
@@ -85,16 +91,35 @@ echo "Applying migrations and collecting static files..."
 "${COMPOSE[@]}" run --rm backend python manage.py check_storage --apply-lifecycle
 "${COMPOSE[@]}" run --rm backend python manage.py collectstatic --noinput
 
-"${COMPOSE[@]}" run --rm --no-deps caddy caddy validate \
-  --config /etc/caddy/Caddyfile --adapter caddyfile
+if [[ -n "${EDGE_CADDY_DIR}" ]]; then
+  # В edge нет переменных sova: подставляем домены и путь к static заранее.
+  edge_site="$(mktemp)"
+  trap 'rm -f "${edge_site}"' EXIT
+  sed -e 's|{\$DOMAIN:[^}]*}|'"${DOMAIN}"'|' \
+      -e 's|{\$AUTH_DOMAIN:[^}]*}|'"${AUTH_DOMAIN}"'|' \
+      -e 's|root \* /srv/static|root * /srv/sova-static|' \
+      "${PROJECT_DIR}/caddy/Caddyfile" > "${edge_site}"
+  docker run --rm -v "${edge_site}:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
+    caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+else
+  "${COMPOSE[@]}" run --rm --no-deps caddy caddy validate \
+    --config /etc/caddy/Caddyfile --adapter caddyfile
+fi
 
 if ! "${COMPOSE[@]}" up -d --wait --remove-orphans; then
   "${COMPOSE[@]}" ps >&2 || true
   exit 1
 fi
 
-# Each release has its own directory, so Caddy must remount the current Caddyfile.
-"${COMPOSE[@]}" up -d --force-recreate --wait caddy
+if [[ -n "${EDGE_CADDY_DIR}" ]]; then
+  # Перечитывание конфига без перезапуска: другие сайты edge не прерываются.
+  install -m 644 "${edge_site}" "${EDGE_CADDY_DIR}/sites/sova.caddy"
+  docker compose -f "${EDGE_CADDY_DIR}/compose.yml" exec -T caddy \
+    caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
+else
+  # Each release has its own directory, so Caddy must remount the current Caddyfile.
+  "${COMPOSE[@]}" up -d --force-recreate --wait caddy
+fi
 healthy=false
 for _ in $(seq 1 12); do
   if curl --fail --silent --max-time 10 "https://${DOMAIN}/api/health/" >/dev/null; then

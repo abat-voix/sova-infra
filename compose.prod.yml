@@ -30,6 +30,9 @@ services:
       SOVA_OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:?Set OIDC_REDIRECT_URI in .env.prod}
 
   caddy:
+    # На общем сервере 80/443 держит edge-Caddy (EDGE_CADDY_DIR), и собственный Caddy
+    # sova не запускается. deploy-prod.sh включает профиль, только если EDGE_CADDY_DIR пуст.
+    profiles: ["self-proxy"]
     environment:
       DOMAIN: ${DOMAIN:?Set DOMAIN in .env.prod}
       AUTH_DOMAIN: ${AUTH_DOMAIN:?Set AUTH_DOMAIN in .env.prod}

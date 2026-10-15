@@ -115,3 +115,10 @@ GitHub Actions передает точное содержимое каждого
 SOVA_PROD_ENV_FILE=/srv/docker/sova.1uup.ru/.env.prod \
   /srv/docker/sova.1uup.ru/releases/v1.2.3/scripts/deploy-prod.sh
 ```
+## Общий edge-Caddy
+
+На сервере 80/443 публикует общий Caddy из `/srv/docker/edge` (`compose.yml`, `Caddyfile` с `import sites/*.caddy`), а не Caddy sova: через него же работают другие проекты (например, payday.1uup.ru).
+
+- Если в `.env.prod` задан `EDGE_CADDY_DIR=/srv/docker/edge`, `deploy-prod.sh` не запускает собственный Caddy sova (профиль `self-proxy`), а подставляет `DOMAIN`/`AUTH_DOMAIN` в `caddy/Caddyfile`, проверяет его, записывает в `$EDGE_CADDY_DIR/sites/sova.caddy` и делает `caddy reload` без перезапуска.
+- Edge подключён к сети `prod-sova-1uup-ru` и монтирует том `prod-sova-1uup-ru_django_static` в `/srv/sova-static`.
+- Без `EDGE_CADDY_DIR` всё работает по-старому: Caddy sova сам публикует 80/443.
